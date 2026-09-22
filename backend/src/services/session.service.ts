@@ -6,7 +6,7 @@ import {
 } from './engine.service.js';
 import { dominantGroupByDay } from './day-focus.service.js';
 import { runWeeklyProgressionForAthlete } from './progression.service.js';
-import { recordAmrap } from './rm.service.js';
+import { recordAmrap, ensureEstimatedRmsFromWeekLogs } from './rm.service.js';
 import { isWarmupName } from './warmup-rule.js';
 import logger from '../utils/logger.js';
 
@@ -344,6 +344,30 @@ async function recordAmrapIfTestingWeek(
 }
 
 /**
+ * Semana de testeo de RM (`is_rm_test`, tipicamente 10 / 30): si el atleta no
+ * cargó el 1RM explícito, deriva un estimado Epley de la mejor serie logueada
+ * en esa semana de programa y lo persiste en rm_tests SIN pisar un RM real.
+ * Así la semana siguiente (11 / 1) puede aplicar pct × RM en vez de caer al
+ * fallback de última carga (ticket #20).
+ */
+async function recordEstimatedRmIfTestingWeek(
+  athleteId: string,
+): Promise<void> {
+  const cfgR = await pool.query<{ is_rm_test: boolean; current_week: number }>(
+    `SELECT p.is_rm_test, s.current_week
+       FROM athlete_program_state s
+       JOIN periodization_config p ON p.week_number = s.current_week
+      WHERE s.athlete_id = $1`,
+    [athleteId],
+  );
+  const row = cfgR.rows[0];
+  if (!row?.is_rm_test) return;
+  const week = row.current_week;
+  if (week !== 10 && week !== 30) return;
+  await ensureEstimatedRmsFromWeekLogs(athleteId, week);
+}
+
+/**
  * Cierra la semana de programa cuando el atleta terminó TODOS sus días.
  *
  * `current_week` la subía sólo el cron de los domingos, así que completar la
@@ -510,6 +534,11 @@ export async function finishSession(
     await recordAmrapIfTestingWeek(sessionId, athleteId);
   } catch (e) {
     logger.error({ err: e, sessionId, athleteId }, 'amrap derivation failed');
+  }
+  try {
+    await recordEstimatedRmIfTestingWeek(athleteId);
+  } catch (e) {
+    logger.error({ err: e, sessionId, athleteId }, 'estimated RM backfill failed');
   }
   await closeWeekIfComplete(athleteId);
   return summary;

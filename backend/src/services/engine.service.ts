@@ -11,6 +11,7 @@ import type { WeeklyOverride } from './weekly-overrides.service.js';
 import { getExclusionMap } from './exclusions.service.js';
 import { isWarmupName } from './warmup-rule.js';
 import type {
+import { ensureEstimatedRmsFromWeekLogs } from './rm.service.js';
   Exercise,
   PeriodizationConfig,
   SessionItem,
@@ -121,12 +122,19 @@ export async function buildTodaySession(
   // AMRAP weeks also resolve a prescribed weight from the RM source, so load
   // the RM map for them too (their config always sets pct_rm + rm_source).
   if (cfg.is_amrap || (cfg.principal_pct_rm && cfg.principal_rm_source)) {
+    const sourceWeek = cfg.principal_rm_source;
+    // Ticket #20: if week-after-RM has no rm_tests (athlete skipped the 1RM
+    // screen), backfill estimates from that source week's logged sets before
+    // resolving weights. No-ops when rows already exist or week is not 10/30.
+    if (sourceWeek === 10 || sourceWeek === 30) {
+      await ensureEstimatedRmsFromWeekLogs(athleteId, sourceWeek);
+    }
     const rmR = await pool.query<{ exercise_id: number; value_kg: string }>(
       `SELECT exercise_id, value_kg::text
          FROM rm_tests
         WHERE athlete_id = $1 AND program_week = $2
           AND exercise_id = ANY($3::int[])`,
-      [athleteId, cfg.principal_rm_source, exerciseIds]
+      [athleteId, sourceWeek, exerciseIds]
     );
     rmByEx = new Map(rmR.rows.map((r) => [r.exercise_id, Number(r.value_kg)]));
   }
