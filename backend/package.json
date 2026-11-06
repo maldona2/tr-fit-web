@@ -28,7 +28,7 @@
     "firebase-admin": "^12.7.0",
     "jsonwebtoken": "^9.0.3",
     "luxon": "^3.7.2",
-    "multer": "^1.4.5-lts.1",
+    "multer": "2.5.0",
     "node-cron": "^4.2.1",
     "openai": "^6.37.0",
     "pg": "^8.13.1",
@@ -61,5 +61,8 @@
     "ts-jest": "^29.2.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "node-forge": "1.4.1"
   }
 }
