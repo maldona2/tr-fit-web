@@ -1,6 +1,9 @@
 {
   "name": "starter-template",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=24.22.3"
+  },
   "description": "A modern full-stack template using React (with Vite), Node.js (Express), and PostgreSQL",
   "main": "index.js",
   "scripts": {
