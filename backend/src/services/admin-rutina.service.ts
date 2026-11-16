@@ -16,6 +16,8 @@ export type AdminRutinaErrorCode =
   | 'rutina_not_active'
   | 'invalid_exercise'
   | 'invalid_payload'
+  | 'invalid_week'
+  | 'session_in_progress'
   | 'empty_patch'
   | 'regen_pending';
 
@@ -87,6 +89,8 @@ export interface RutinaDetail {
     days_specific: string[] | null;
   };
   has_active_session: boolean;
+  current_week: number;
+  total_weeks: number;
   /**
    * Session ordinals the athlete already finished in the current program week.
    * Reordering days remaps ordinals, so days already logged this week keep
@@ -112,8 +116,14 @@ export async function getPendingSkeletonId(
 export async function getActiveRutina(
   athleteId: string
 ): Promise<RutinaDetail | null> {
-  const state = await pool.query<{ active_skeleton_id: string | null }>(
-    `SELECT active_skeleton_id FROM athlete_program_state WHERE athlete_id = $1`,
+  const state = await pool.query<{
+    active_skeleton_id: string | null;
+    current_week: number | null;
+    total_weeks: number | null;
+  }>(
+    `SELECT active_skeleton_id, current_week,
+            (SELECT COUNT(*)::int FROM periodization_config) AS total_weeks
+       FROM athlete_program_state WHERE athlete_id = $1`,
     [athleteId]
   );
   const skId = state.rows[0]?.active_skeleton_id;
@@ -176,8 +186,102 @@ export async function getActiveRutina(
     days: daysR.rows,
     profile: profR.rows[0],
     has_active_session: sessR.rows[0].exists,
+    current_week: state.rows[0].current_week ?? 1,
+    total_weeks: state.rows[0].total_weeks ?? 30,
     trained_days_this_week: trainedR.rows.map((r) => r.day_of_week),
   };
+}
+
+/**
+ * Manda al atleta a una semana del plan. La pasada anterior de esa semana
+ * deja de contar (program_reset_at): vuelve a entrenarla, y al cerrarla la
+ * progresión sigue con la siguiente. No toca cargas, RM ni historial.
+ */
+export async function setProgramWeek(
+  athleteId: string,
+  week: number,
+  actor: string
+): Promise<{ current_week: number; rm_test_blocking: boolean }> {
+  const client = await pool.connect();
+  let changed = false;
+  let blocking = false;
+  let fromWeek = week;
+  try {
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+      athleteId,
+    ]);
+    const stateR = await client.query<{
+      current_week: number;
+      active_skeleton_id: string | null;
+      rm_test_blocking: boolean;
+    }>(
+      `SELECT current_week, active_skeleton_id, rm_test_blocking
+         FROM athlete_program_state WHERE athlete_id = $1
+         FOR UPDATE`,
+      [athleteId]
+    );
+    const state = stateR.rows[0];
+    if (!state?.active_skeleton_id) throw new AdminRutinaError('not_found');
+    fromWeek = state.current_week;
+    blocking = state.rm_test_blocking;
+    if (week === state.current_week) {
+      await client.query('COMMIT');
+      return { current_week: week, rm_test_blocking: blocking };
+    }
+
+    const open = await client.query(
+      `SELECT 1 FROM session_logs
+        WHERE athlete_id = $1 AND finished_at IS NULL
+        LIMIT 1`,
+      [athleteId]
+    );
+    if ((open.rowCount ?? 0) > 0) {
+      throw new AdminRutinaError('session_in_progress');
+    }
+
+    const cfg = await client.query<{
+      is_rm_test: boolean;
+      is_amrap: boolean;
+    }>(
+      `SELECT is_rm_test, is_amrap FROM periodization_config WHERE week_number = $1`,
+      [week]
+    );
+    if (!cfg.rows[0]) throw new AdminRutinaError('invalid_week');
+    blocking = !!(cfg.rows[0].is_rm_test || cfg.rows[0].is_amrap);
+
+    await client.query(
+      `UPDATE athlete_program_state
+          SET current_week = $2,
+              program_reset_at = NOW(),
+              last_week_advanced_at = NOW(),
+              rm_test_blocking = $3
+        WHERE athlete_id = $1`,
+      [athleteId, week, blocking]
+    );
+    await client.query('COMMIT');
+    changed = true;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (changed) {
+    await pool
+      .query(
+        `INSERT INTO admin_audit_log (type, actor, target, target_id, meta, severity)
+         VALUES ('program_week_set', $1, 'athlete', $2, $3, 'warning')`,
+        [
+          actor,
+          athleteId,
+          JSON.stringify({ from_week: fromWeek, to_week: week }),
+        ]
+      )
+      .catch(() => {});
+  }
+  return { current_week: week, rm_test_blocking: blocking };
 }
 
 export async function changeTrainingDays(

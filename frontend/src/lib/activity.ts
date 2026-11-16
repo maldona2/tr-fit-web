@@ -18,6 +18,7 @@ const LABELS: Record<AuditType, string> = {
   membership_vacation: 'Pago por vacaciones',
   athlete_rm_changed: 'RM actualizado',
   athlete_weight_changed: 'Peso de ejercicio actualizado',
+  program_week_set: 'Semana del plan',
   force_logout: 'Logout forzado',
 };
 
@@ -30,6 +31,13 @@ export function activitySub(ev: ActivityEvent): string | null {
   if (!meta) return null;
   if (ev.type === 'role_changed' && meta.from && meta.to) {
     return `${String(meta.from)} → ${String(meta.to)}`;
+  }
+  if (
+    ev.type === 'program_week_set' &&
+    meta.from_week != null &&
+    meta.to_week != null
+  ) {
+    return `Semana ${String(meta.from_week)} → ${String(meta.to_week)}`;
   }
   if (
     (ev.type === 'subscription_created' ||

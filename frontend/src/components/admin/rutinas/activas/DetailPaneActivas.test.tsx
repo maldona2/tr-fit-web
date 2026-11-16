@@ -95,6 +95,32 @@ beforeEach(() => {
   vi.mocked(api.post).mockResolvedValue({ data: {} });
 });
 
+describe('DetailPaneActivas program week', () => {
+  it('shows the current week and blocks the change while a session is open', async () => {
+    vi.mocked(api.get).mockImplementation(async (url: string) => {
+      if (url.startsWith('/admin/rutinas/atleta/')) {
+        return {
+          data: {
+            ...rutinaResponse,
+            rutina: {
+              ...rutinaResponse.rutina,
+              current_week: 9,
+              total_weeks: 30,
+              has_active_session: true,
+            },
+          },
+        };
+      }
+      return { data: { items: [] } };
+    });
+    renderPane();
+    expect(await screen.findByText('Semana 9 de 30')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Cambiar semana' })
+    ).toBeDisabled();
+  });
+});
+
 describe('DetailPaneActivas draft save', () => {
   it('does not show save bar without changes', async () => {
     renderPane();

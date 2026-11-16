@@ -49,10 +49,7 @@ function seed(opts: {
   doneDays?: number[];
 }) {
   pushHandler(
-    (s) =>
-      s.startsWith(
-        'SELECT current_week, active_skeleton_id FROM athlete_program_state'
-      ),
+    (s) => s.startsWith('SELECT current_week, active_skeleton_id'),
     [
       {
         current_week: opts.currentWeek ?? 1,
@@ -160,10 +157,7 @@ function seedBuildSession(
 ) {
   // 1. program_state — week 1, active skeleton sk-excl
   pushHandler(
-    (s) =>
-      s.startsWith(
-        'SELECT current_week, active_skeleton_id FROM athlete_program_state'
-      ),
+    (s) => s.startsWith('SELECT current_week, active_skeleton_id'),
     [
       {
         current_week: 1,
@@ -290,10 +284,7 @@ const pctRmConfig = {
 function seedMissingRmSession(aewRow: object | null) {
   // 1. program_state
   pushHandler(
-    (s) =>
-      s.startsWith(
-        'SELECT current_week, active_skeleton_id FROM athlete_program_state'
-      ),
+    (s) => s.startsWith('SELECT current_week, active_skeleton_id'),
     [{ current_week: 2, active_skeleton_id: 'sk-rm' }]
   );
   // 2. periodization_config — pct_rm branch, no amrap, no rm_test
@@ -364,7 +355,12 @@ describe('buildTodaySession — missing-RM principal fallback', () => {
 // ---------------------------------------------------------------------------
 // Ticket #57: first block (weeks 1–9) without an RM30
 // ---------------------------------------------------------------------------
-function firstBlockCfg(week: number, reps: string, pct: number, isDeload = false) {
+function firstBlockCfg(
+  week: number,
+  reps: string,
+  pct: number,
+  isDeload = false
+) {
   return {
     ...pctRmConfig,
     week_number: week,
@@ -385,15 +381,13 @@ function seedFirstBlock(opts: {
   logs?: { week: number; value: number; reps: number; rpe: number | null }[];
 }) {
   pushHandler(
-    (s) =>
-      s.startsWith(
-        'SELECT current_week, active_skeleton_id FROM athlete_program_state'
-      ),
+    (s) => s.startsWith('SELECT current_week, active_skeleton_id'),
     [{ current_week: opts.week, active_skeleton_id: 'sk-rm' }]
   );
-  pushHandler((s) => s.startsWith('SELECT * FROM periodization_config'), [
-    opts.cfg,
-  ]);
+  pushHandler(
+    (s) => s.startsWith('SELECT * FROM periodization_config'),
+    [opts.cfg]
+  );
   pushHandler(
     (s) => s.startsWith('SELECT principal_reps FROM periodization_config'),
     opts.prevReps ? [{ principal_reps: opts.prevReps }] : []
@@ -490,7 +484,10 @@ describe('buildTodaySession — first block without RM30 (ticket #57)', () => {
       cfg: firstBlockCfg(3, '8', 0.75),
       prevReps: '10',
       aew: 57.5,
-      logs: [...threeSets(2, 60, 10, 8), { week: 3, value: 57.5, reps: 8, rpe: 8 }],
+      logs: [
+        ...threeSets(2, 60, 10, 8),
+        { week: 3, value: 57.5, reps: 8, rpe: 8 },
+      ],
     });
     const [item] = await buildTodaySession('athlete-rm', 1);
     expect(item.suggested_value).toBe(57.5);
@@ -589,10 +586,7 @@ describe('buildTodaySession — per-accessory prescription (migration 038)', () 
     weightRows: unknown[] = []
   ) {
     pushHandler(
-      (s) =>
-        s.startsWith(
-          'SELECT current_week, active_skeleton_id FROM athlete_program_state'
-        ),
+      (s) => s.startsWith('SELECT current_week, active_skeleton_id'),
       [
         {
           current_week: 1,
@@ -700,10 +694,7 @@ describe('buildTodaySession — warm-up role safety net (bug 2026-07-04)', () =>
     exerciseRows: unknown[] = [warmupEx]
   ) {
     pushHandler(
-      (s) =>
-        s.startsWith(
-          'SELECT current_week, active_skeleton_id FROM athlete_program_state'
-        ),
+      (s) => s.startsWith('SELECT current_week, active_skeleton_id'),
       [
         {
           current_week: 1,

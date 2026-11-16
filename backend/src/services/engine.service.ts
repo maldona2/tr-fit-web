@@ -39,8 +39,9 @@ export async function buildTodaySession(
   const stateR = await pool.query<{
     current_week: number;
     active_skeleton_id: string | null;
+    program_reset_at: Date | null;
   }>(
-    `SELECT current_week, active_skeleton_id
+    `SELECT current_week, active_skeleton_id, program_reset_at
        FROM athlete_program_state WHERE athlete_id = $1`,
     [athleteId]
   );
@@ -174,7 +175,8 @@ export async function buildTodaySession(
         missing,
         state.current_week,
         cfg,
-        exById
+        exById,
+        state.program_reset_at
       );
     }
   }
@@ -195,12 +197,14 @@ export async function buildTodaySession(
          FROM rm_tests
         WHERE athlete_id = $1 AND program_week = $2
           AND exercise_id = ANY($3::int[])
-          AND ($4::timestamptz IS NULL OR tested_at < $4)`,
+          AND ($4::timestamptz IS NULL OR tested_at < $4)
+          AND ($5::timestamptz IS NULL OR tested_at >= $5)`,
       [
         athleteId,
         state.current_week,
         exerciseIds,
         opts?.ignoreRmsOnOrAfter ?? null,
+        state.program_reset_at,
       ]
     );
     alreadyTestedThisWeek = new Map(
@@ -299,13 +303,16 @@ async function loadEstimatedRm(
  * Toma la última sesión de cada semana: set_logs no guarda el ciclo y un
  * reset de programa deja los logs del ciclo anterior. Si el alumno ya cargó
  * el ejercicio esta semana, su peso (AEW) manda y el ejercicio no entra acá.
+ * Los logs de esta semana anteriores a program_reset_at son una pasada
+ * vieja (salto manual o cambio de gimnasio) y no cuentan como ya cargados.
  */
 async function loadFirstBlockWeights(
   athleteId: string,
   exerciseIds: number[],
   week: number,
   cfg: PeriodizationConfig,
-  exById: Map<number, Exercise>
+  exById: Map<number, Exercise>,
+  programResetAt: Date | string | null
 ): Promise<Map<number, number | null>> {
   const refWeek = cfg.is_deload ? 1 : week - 1;
   const r = await pool.query<{
@@ -325,6 +332,10 @@ async function loadFirstBlockWeights(
           AND drop_index IS NULL
           AND completed = TRUE
           AND COALESCE(value, weight_kg) > 0
+          AND (
+            week <> $4
+            OR logged_at >= COALESCE($5::timestamptz, '-infinity')
+          )
         ORDER BY exercise_id, week, logged_at DESC
      )
      SELECT sl.exercise_id, sl.week, sl.completed, sl.reps,
@@ -335,7 +346,7 @@ async function loadFirstBlockWeights(
          ON sl.session_log_id = ls.session_log_id
         AND sl.exercise_id = ls.exercise_id
       WHERE sl.drop_index IS NULL`,
-    [athleteId, exerciseIds, [refWeek, week]]
+    [athleteId, exerciseIds, [refWeek, week], week, programResetAt]
   );
 
   const loggedThisWeek = new Set<number>();
@@ -522,7 +533,10 @@ async function buildItem(
         // choice if no week uses it). Never aewValue — that is the RM itself.
         const weight =
           repeatDayPct && testedRm > 0
-            ? roundWeightForEquipment(testedRm * repeatDayPct, exercise.equipment)
+            ? roundWeightForEquipment(
+                testedRm * repeatDayPct,
+                exercise.equipment
+              )
             : null;
         item = baseItem(
           exercise,
@@ -591,8 +605,7 @@ async function buildItem(
       // RM real de la semana fuente, o el estimado si esa semana ya pasó
       // y el atleta no testeó. Los dos se multiplican por el % de la semana.
       const rm =
-        rmByEx.get(slot.exercise_id) ??
-        estimatedRmByEx.get(slot.exercise_id);
+        rmByEx.get(slot.exercise_id) ?? estimatedRmByEx.get(slot.exercise_id);
       // Sin series para estimar: el peso guardado (lo que el sistema ya
       // arrastró) también cuenta como RM, no como carga de 8–10 reps.
       const carriedAsRm =
@@ -620,10 +633,7 @@ async function buildItem(
           'missing_rm'
         );
       } else {
-        const weight = roundWeightForEquipment(
-          base * pct,
-          exercise.equipment
-        );
+        const weight = roundWeightForEquipment(base * pct, exercise.equipment);
         item = baseItem(
           exercise,
           role,

@@ -554,6 +554,11 @@ export type AdminSlotPatch = z.infer<typeof adminSlotPatchPayload>;
 export type AdminReorderInput = z.infer<typeof adminReorderPayload>;
 export type AdminTrainingDaysInput = z.infer<typeof adminTrainingDaysPayload>;
 
+export const adminProgramWeekPayload = z.object({
+  week: z.number().int().min(1).max(30),
+});
+export type AdminProgramWeekInput = z.infer<typeof adminProgramWeekPayload>;
+
 export const alertResolvePayload = z.object({
   action: z.enum(ALERT_RESOLUTION_ACTIONS),
   payload: z.record(z.string(), z.unknown()).default({}),

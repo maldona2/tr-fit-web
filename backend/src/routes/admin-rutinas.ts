@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import pool from '../db/connect.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/role.js';
 import {
@@ -8,6 +9,7 @@ import {
   adminReorderPayload,
   adminTrainingDaysPayload,
   adminApplyEditsPayload,
+  adminProgramWeekPayload,
 } from '../domain/schemas.js';
 import {
   listActiveAthletes,
@@ -20,6 +22,7 @@ import {
   AdminRutinaError,
   changeTrainingDays,
   applyEdits,
+  setProgramWeek,
 } from '../services/admin-rutina.service.js';
 
 const UUID_RE =
@@ -52,6 +55,12 @@ function mapError(err: unknown, res: Response): Response | void {
     }
     if (err.code === 'not_found') {
       return res.status(404).json({ error: 'not_found' });
+    }
+    if (err.code === 'invalid_week') {
+      return res.status(400).json({ error: 'invalid_week' });
+    }
+    if (err.code === 'session_in_progress') {
+      return res.status(409).json({ error: 'session_in_progress' });
     }
   }
   throw err;
@@ -97,6 +106,39 @@ router.post('/atleta/:athleteId/slots', async (req: Request, res: Response) => {
     mapError(e, res);
   }
 });
+
+async function actorEmail(req: Request): Promise<string> {
+  if (!req.user) return 'system';
+  const r = await pool.query<{ email: string }>(
+    `SELECT email FROM users WHERE id = $1`,
+    [req.user.id]
+  );
+  return r.rows[0]?.email ?? `admin:${req.user.id.slice(0, 8)}`;
+}
+
+router.post(
+  '/atleta/:athleteId/program-week',
+  async (req: Request, res: Response) => {
+    const athleteId = requireUuid(req.params.athleteId, res);
+    if (!athleteId) return;
+    const parsed = adminProgramWeekPayload.safeParse(req.body);
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: 'invalid_payload', issues: parsed.error.issues });
+    }
+    try {
+      const state = await setProgramWeek(
+        athleteId,
+        parsed.data.week,
+        await actorEmail(req)
+      );
+      res.json(state);
+    } catch (error) {
+      mapError(error, res);
+    }
+  }
+);
 
 router.post(
   '/atleta/:athleteId/training-days',

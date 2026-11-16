@@ -428,6 +428,7 @@ export type AuditType =
   | 'athlete_fee_changed'
   | 'athlete_rm_changed'
   | 'athlete_weight_changed'
+  | 'program_week_set'
   | 'force_logout';
 
 export type AuditSeverity = 'brand' | 'warning' | 'destructive' | null;

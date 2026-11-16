@@ -30,6 +30,7 @@ import {
   remapDaysForMove,
 } from './DayCard';
 import { ChangeTrainingDaysDialog } from './ChangeTrainingDaysDialog';
+import { SetProgramWeekDialog } from './SetProgramWeekDialog';
 
 export function DetailPaneActivas({
   athleteId,
@@ -39,6 +40,7 @@ export function DetailPaneActivas({
   onDirtyChange?: Dispatch<boolean>;
 }) {
   const [daysOpen, setDaysOpen] = useState(false);
+  const [weekOpen, setWeekOpen] = useState(false);
   const { data, isLoading, error } = useActiveRutina(athleteId);
   const rutina = data?.rutina ?? null;
   const pendingSkeletonId = data?.pending_skeleton_id ?? null;
@@ -461,12 +463,39 @@ export function DetailPaneActivas({
               </Link>
             </div>
           </div>
-          <Badge variant="outline" className="shrink-0">
-            {rutina.profile.days_per_week} días/sem
-          </Badge>
-          <Button variant="outline" size="sm" onClick={() => setDaysOpen(true)}>
-            Cambiar días
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {typeof rutina.current_week === 'number' && (
+              <>
+                <Badge variant="outline" className="shrink-0">
+                  Semana {rutina.current_week}
+                  {rutina.total_weeks ? ` de ${rutina.total_weeks}` : ''}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWeekOpen(true)}
+                  disabled={rutina.has_active_session}
+                  title={
+                    rutina.has_active_session
+                      ? 'Esperá a que termine la sesión abierta'
+                      : undefined
+                  }
+                >
+                  Cambiar semana
+                </Button>
+              </>
+            )}
+            <Badge variant="outline" className="shrink-0">
+              {rutina.profile.days_per_week} días/sem
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDaysOpen(true)}
+            >
+              Cambiar días
+            </Button>
+          </div>
         </div>
         {rutina.has_active_session && (
           <div className="mt-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -548,6 +577,15 @@ export function DetailPaneActivas({
         open={daysOpen}
         onOpenChange={setDaysOpen}
       />
+      {typeof rutina.current_week === 'number' && (
+        <SetProgramWeekDialog
+          athleteId={athleteId}
+          currentWeek={rutina.current_week}
+          totalWeeks={rutina.total_weeks ?? rutina.current_week}
+          open={weekOpen}
+          onOpenChange={setWeekOpen}
+        />
+      )}
     </div>
   );
 }
