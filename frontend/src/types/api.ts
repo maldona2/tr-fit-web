@@ -22,11 +22,7 @@ export interface CoachAthlete {
   onboarded_at: string;
   current_week: number | null;
   skeleton_status:
-    | 'pending_review'
-    | 'approved'
-    | 'rejected'
-    | 'superseded'
-    | null;
+    'pending_review' | 'approved' | 'rejected' | 'superseded' | null;
   last_session_at: string | null;
   unread_alerts_count: number;
 }
@@ -95,8 +91,7 @@ export interface RutinaDetail {
     goal: 'hipertrofia' | 'fuerza' | 'recomp' | 'perdida_grasa';
     days_per_week: number;
     days_specific:
-      | ('lun' | 'mar' | 'mie' | 'jue' | 'vie' | 'sab' | 'dom')[]
-      | null;
+      ('lun' | 'mar' | 'mie' | 'jue' | 'vie' | 'sab' | 'dom')[] | null;
     equipment: 'gym_completo' | 'gym_basico' | 'casa_basica' | 'solo_bw';
     injuries: string[];
     exercise_minutes: number | null;
@@ -130,10 +125,7 @@ export interface AthleteDetailResponse {
 export type UserStatus = 'pending' | 'approved' | 'rejected';
 export type SubscriptionTier = 'basico' | 'full' | 'premium';
 export type SubscriptionStatus =
-  | 'pending'
-  | 'authorized'
-  | 'paused'
-  | 'cancelled';
+  'pending' | 'authorized' | 'paused' | 'cancelled';
 
 export interface AdminUser {
   id: string;
@@ -155,19 +147,13 @@ export interface AdminUser {
   last_session_at: string | null;
   days_per_week: number | null;
   days_specific:
-    | ('lun' | 'mar' | 'mie' | 'jue' | 'vie' | 'sab' | 'dom')[]
-    | null;
+    ('lun' | 'mar' | 'mie' | 'jue' | 'vie' | 'sab' | 'dom')[] | null;
   injuries: string[] | null;
   profile: RutinaDetail['profile'] | null;
 }
 
 export type MembershipStatus =
-  | 'active'
-  | 'expiring'
-  | 'expired'
-  | 'cancelled'
-  | 'paused'
-  | 'vacation';
+  'active' | 'expiring' | 'expired' | 'cancelled' | 'paused' | 'vacation';
 
 export type AuditType =
   | 'user_created'
@@ -187,6 +173,7 @@ export type AuditType =
   | 'membership_vacation'
   | 'athlete_rm_changed'
   | 'athlete_weight_changed'
+  | 'program_week_set'
   | 'force_logout';
 
 export interface AthleteExerciseWeight {
@@ -385,6 +372,8 @@ export interface ActiveRutinaDetail {
     days_specific: string[] | null;
   };
   has_active_session: boolean;
+  current_week?: number;
+  total_weeks?: number;
   /** Session ordinals already finished in the current program week. */
   trained_days_this_week?: number[];
 }

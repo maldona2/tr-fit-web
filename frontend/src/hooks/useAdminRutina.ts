@@ -177,3 +177,15 @@ export function useChangeTrainingDays(athleteId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.detail(athleteId) }),
   });
 }
+
+export function useSetProgramWeek(athleteId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (week: number) => {
+      await api.post(`/admin/rutinas/atleta/${athleteId}/program-week`, {
+        week,
+      });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.detail(athleteId) }),
+  });
+}
