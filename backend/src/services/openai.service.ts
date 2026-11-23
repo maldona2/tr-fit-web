@@ -175,10 +175,10 @@ export async function adjustSkeleton(
       logger.warn({ attempt, refusal: choice.message.refusal }, 'openai: refusal');
       continue;
     }
-    const out = choice?.message?.parsed;
-    if (!out) {
-      lastError = 'no parsed output';
-      logger.warn({ attempt }, 'openai: no parsed output');
+    const result = aiSkeletonOutput.safeParse(choice?.message?.parsed);
+    if (!result.success) {
+      lastError = 'invalid skeleton output';
+      logger.warn({ attempt }, 'openai: invalid skeleton output');
       continue;
     }
 
@@ -186,7 +186,7 @@ export async function adjustSkeleton(
     // let mistagged warm-ups through): re-tag warm-ups the model mislabeled
     // BEFORE validating (so the series budget counts them as 1), then force
     // the mandatory joint-mobility warm-up into slot 1 of every day.
-    const normalized = normalizeWarmupRoles(out, exercises);
+    const normalized = normalizeWarmupRoles(result.data, exercises);
 
     lastError = validateAdjusted(normalized, {
       N, minutes, exerciseById, expectedSeries,
