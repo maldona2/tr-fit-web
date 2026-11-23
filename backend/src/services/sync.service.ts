@@ -1,5 +1,6 @@
 import pool from '../db/connect.js';
 import type { SetLogPayload } from '../domain/schemas.js';
+import { seedExerciseWeight } from './session.service.js';
 
 export interface SyncResult {
   accepted: Array<{ clientId: string; setId: string; syncedAt: string }>;
@@ -66,6 +67,9 @@ export async function syncSets(
        set.set_index, set.value, set.unit, set.reps, set.completed,
        set.rpe ?? null, set.drop_index ?? null, sessionId, set.client_id, set.client_ts],
     );
+    // Sin esto el set offline quedaba en set_logs pero el próximo swap /
+    // sesión abría en "— kg" (reporte máquina ocupada, 2026-11-23).
+    await seedExerciseWeight(athleteId, set);
     result.accepted.push({
       clientId: set.client_id,
       setId: r.rows[0].id,
@@ -76,7 +80,8 @@ export async function syncSets(
   await pool.query(
     `UPDATE session_logs
        SET total_sets_completed = (
-         SELECT COUNT(*) FROM set_logs
+         -- Series distintas, no filas: un dropset loguea una fila por drop.
+         SELECT COUNT(DISTINCT (exercise_id, set_index)) FROM set_logs
           WHERE session_log_id = $1 AND completed = TRUE)
      WHERE id = $1`,
     [sessionId],

@@ -88,3 +88,47 @@ it('syncSets returns not_found for foreign session', async () => {
   expect(r.conflicts).toHaveLength(1);
   expect(r.conflicts[0].reason).toBe('not_found');
 });
+
+it('syncSets seeds the weight suggestion, also for a swapped exercise (máquina ocupada offline)', async () => {
+  const { ath, sessionId, principalId } = await setupSession();
+  // Ejercicio fuera de la rutina: lo que loguea el atleta tras un swap.
+  const alt = await pool.query<{ id: number }>(
+    `SELECT id FROM exercises WHERE id <> $1 AND equipment <> 'bw' LIMIT 1`,
+    [principalId],
+  );
+  const altId = alt.rows[0].id;
+  const r = await syncSets(ath, sessionId, [{
+    exercise_id: altId, set_index: 1, unit: 'kg' as const, value: 42.5, reps: 10,
+    completed: true, client_id: randomUUID(), client_ts: new Date().toISOString(),
+  }]);
+  expect(r.accepted).toHaveLength(1);
+
+  const w = await pool.query<{ v: string; scheme: string }>(
+    `SELECT current_value::text AS v, scheme FROM athlete_exercise_weights
+      WHERE athlete_id = $1 AND exercise_id = $2`,
+    [ath, altId],
+  );
+  expect(w.rows.map((x) => [Number(x.v), x.scheme])).toEqual([[42.5, 'normal']]);
+});
+
+it('syncSets counts a dropset series once and seeds only the heaviest drop', async () => {
+  const { ath, sessionId, principalId } = await setupSession();
+  const drops = [60, 45, 30].map((value, i) => ({
+    exercise_id: principalId, set_index: 1, unit: 'kg' as const, value, reps: 8,
+    completed: true, drop_index: i + 1, client_id: randomUUID(),
+    client_ts: new Date().toISOString(),
+  }));
+  await syncSets(ath, sessionId, drops);
+
+  const s = await pool.query<{ n: number }>(
+    `SELECT total_sets_completed AS n FROM session_logs WHERE id = $1`,
+    [sessionId],
+  );
+  expect(s.rows[0].n).toBe(1);
+  const w = await pool.query<{ v: string }>(
+    `SELECT current_value::text AS v FROM athlete_exercise_weights
+      WHERE athlete_id = $1 AND exercise_id = $2 AND scheme = 'dropset'`,
+    [ath, principalId],
+  );
+  expect(Number(w.rows[0].v)).toBe(60);
+});
