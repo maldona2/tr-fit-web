@@ -220,3 +220,29 @@ it('rotation failure does not block the week advance', async () => {
     );
   }
 });
+
+it('skips rotation when the coach locked it for the athlete', async () => {
+  const coach = await createAdmin();
+  const ath = await createAthlete(coach);
+  const acc = await espaldaPair();
+  const skeletonId = await setup(coach, ath, acc);
+  await pool.query(
+    `UPDATE users SET exercise_rotation_locked = TRUE WHERE id = $1`,
+    [ath]
+  );
+
+  const client = await pool.connect();
+  let rec;
+  try {
+    rec = await rotateOneExercise(client, ath, skeletonId, 3, () => 0);
+  } finally {
+    client.release();
+  }
+
+  expect(rec).toBeNull();
+  const slot = await pool.query(
+    `SELECT exercise_id FROM skeleton_slots WHERE skeleton_id = $1 AND slot_index = 2`,
+    [skeletonId]
+  );
+  expect(slot.rows[0].exercise_id).toBe(acc);
+});

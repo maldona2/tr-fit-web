@@ -334,6 +334,30 @@ router.get('/users/:id/rotations', async (req: Request, res: Response) => {
   res.json(rows);
 });
 
+// Freeze/unfreeze the automatic rotation for one athlete.
+router.get('/users/:id/rotation-lock', async (req: Request, res: Response) => {
+  const { rows } = await pool.query<{ exercise_rotation_locked: boolean }>(
+    `SELECT exercise_rotation_locked FROM users WHERE id = $1`,
+    [req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not_found' });
+  res.json({ locked: rows[0].exercise_rotation_locked });
+});
+
+router.put('/users/:id/rotation-lock', async (req: Request, res: Response) => {
+  const parsed = z.object({ locked: z.boolean() }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'invalid_payload' });
+  }
+  const { rows } = await pool.query<{ exercise_rotation_locked: boolean }>(
+    `UPDATE users SET exercise_rotation_locked = $1
+      WHERE id = $2 RETURNING exercise_rotation_locked`,
+    [parsed.data.locked, req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not_found' });
+  res.json({ locked: rows[0].exercise_rotation_locked });
+});
+
 const patchBody = z
   .object({
     role: z.enum(['athlete', 'admin', 'superadmin']).optional(),

@@ -24,6 +24,13 @@ export async function rotateOneExercise(
   programWeek: number,
   rng: () => number = Math.random
 ): Promise<RotationRecord | null> {
+  // Coach froze the plan (e.g. ACL rehab): no automatic changes.
+  const lockR = await client.query<{ exercise_rotation_locked: boolean }>(
+    `SELECT exercise_rotation_locked FROM users WHERE id = $1`,
+    [athleteId]
+  );
+  if (lockR.rows[0]?.exercise_rotation_locked) return null;
+
   const profR = await client.query<AthleteProfile>(
     `SELECT * FROM athlete_profiles WHERE user_id = $1`,
     [athleteId]
