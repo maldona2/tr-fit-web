@@ -466,13 +466,13 @@ export function generateSixDigitCode(): string {
 export async function forgotPassword(
   email: string,
   requestedIp: string | null = null
-): Promise<void> {
+): Promise<{ emailSendFailed: boolean }> {
   const r = await pool.query<{ id: string }>(
     `SELECT id FROM users WHERE email = $1`,
     [email]
   );
   const user = r.rows[0];
-  if (!user) return; // Silently return — anti-enumeration
+  if (!user) return { emailSendFailed: false }; // anti-enumeration
 
   const code = generateSixDigitCode();
   const codeHash = await bcrypt.hash(code, BCRYPT_COST);
@@ -490,8 +490,10 @@ export async function forgotPassword(
   // Best-effort email (anti-enumeration: caller still gets 200)
   try {
     await sendPasswordResetEmail(email, code);
+    return { emailSendFailed: false };
   } catch (e) {
     logger.error({ err: e, email }, 'failed to send reset code email');
+    return { emailSendFailed: true };
   }
 }
 
