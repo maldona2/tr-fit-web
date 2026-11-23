@@ -11,7 +11,7 @@ import {
   resumeMembership,
   MembershipError,
 } from '../services/membership.service.js';
-import { forceLogout } from '../services/auth.service.js';
+import { forceLogout, forgotPassword } from '../services/auth.service.js';
 import {
   listUsers,
   getUser,
@@ -679,6 +679,17 @@ router.post('/users/:id/payments', async (req: Request, res: Response) => {
   await notifyApproved(before, after);
 
   res.status(201).json({ membership });
+});
+
+// Send the user the same 6-digit reset code as the app's forgot-password
+// flow, but tell the admin when the mail service fails (the public endpoint
+// hides it for anti-enumeration).
+router.post('/users/:id/password-reset', async (req: Request, res: Response) => {
+  const user = await getUser(req.params.id);
+  if (!user) return res.status(404).json({ error: 'not_found' });
+  const { emailSendFailed } = await forgotPassword(user.email, req.ip ?? null);
+  if (emailSendFailed) return res.status(502).json({ error: 'email_send_failed' });
+  res.json({ ok: true, email: user.email });
 });
 
 // Kill every active session of a user. Takes effect at the next token refresh

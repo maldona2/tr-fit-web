@@ -50,6 +50,7 @@ import {
   useAdminUser,
   useDeleteUser,
   useForceLogout,
+  useSendPasswordReset,
   usePauseMembership,
   useRegisterPayment,
   useResumeMembership,
@@ -349,7 +350,19 @@ function IdentityCard({ user, isSelf }: { user: AdminUser; isSelf: boolean }) {
   );
 }
 
+function usePasswordResetAction(user: AdminUser) {
+  const m = useSendPasswordReset(user.id);
+  const onClick = () =>
+    m.mutate(undefined, {
+      onSuccess: () => toast.success(`Código de reseteo enviado a ${user.email}`),
+      onError: (e) =>
+        toast.error(`No se pudo enviar el email: ${(e as Error).message}`),
+    });
+  return { onClick, pending: m.isPending };
+}
+
 function ResumenTab({ user }: { user: AdminUser }) {
+  const reset = usePasswordResetAction(user);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
       <div className="flex flex-col gap-4">
@@ -459,9 +472,15 @@ function ResumenTab({ user }: { user: AdminUser }) {
               <Mail data-icon="inline-start" />
               Reenviar email de verificación
             </Button>
-            <Button variant="outline" size="sm" className="justify-start">
+            <Button
+              variant="outline"
+              size="sm"
+              className="justify-start"
+              onClick={reset.onClick}
+              disabled={reset.pending}
+            >
               <RefreshCw data-icon="inline-start" />
-              Generar link de reseteo
+              Enviar código de reseteo
             </Button>
             <Button variant="outline" size="sm" className="justify-start">
               <ExternalLink data-icon="inline-start" />
@@ -1696,6 +1715,7 @@ function PeligroTab({
   onAskDelete: () => void;
 }) {
   const forceLogout = useForceLogout(user.id);
+  const reset = usePasswordResetAction(user);
   const onForceLogout = () =>
     forceLogout.mutate(undefined, {
       onSuccess: () =>
@@ -1729,8 +1749,10 @@ function PeligroTab({
           />
           <DangerRow
             title="Resetear contraseña"
-            body="Genera un link de un solo uso y se lo envía por email al usuario."
-            action="Generar link"
+            body="Le envía por email un código de 6 dígitos para cambiar la contraseña desde la app."
+            action="Enviar código"
+            onClick={reset.onClick}
+            disabled={reset.pending}
           />
           <DangerRow
             title="Eliminar usuario"

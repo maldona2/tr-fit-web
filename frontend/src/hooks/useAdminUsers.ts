@@ -104,6 +104,14 @@ export function useForceLogout(id: string) {
   });
 }
 
+export function useSendPasswordReset(id: string) {
+  return useMutation({
+    mutationFn: async (): Promise<void> => {
+      await api.post(`/admin/users/${id}/password-reset`);
+    },
+  });
+}
+
 export function usePauseMembership(id: string) {
   const qc = useQueryClient();
   return useMutation({
