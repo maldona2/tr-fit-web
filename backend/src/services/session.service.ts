@@ -173,11 +173,27 @@ export async function logSet(
     [sessionId],
   );
 
-  // Persist the logged weight as the athlete's current suggestion for this
-  // exercise, so the next session pre-fills it (instead of "— kg"). Skips
-  // warmup/bodyweight/time/distance sets, where value is null. For dropsets
-  // only the heaviest drop (drop_index = 1) seeds; the lighter drops (2, 3 …)
-  // must not drag the suggestion down. Normal sets carry drop_index = NULL.
+  await seedExerciseWeight(athleteId, payload);
+
+  return { setId: r.rows[0].id, created: r.rows[0].was_insert };
+}
+
+/**
+ * Persist the logged weight as the athlete's current suggestion for this
+ * exercise, so the next session (or the next "máquina ocupada" swap to it)
+ * pre-fills it instead of "— kg". Shared by logSet and the offline syncSets:
+ * a set that arrived through the sync queue used to land in set_logs without
+ * ever seeding the suggestion.
+ *
+ * Skips warmup/bodyweight/time/distance sets, where value is null. For
+ * dropsets only the heaviest drop (drop_index = 1) seeds; the lighter drops
+ * (2, 3 …) must not drag the suggestion down. Normal sets carry
+ * drop_index = NULL.
+ */
+export async function seedExerciseWeight(
+  athleteId: string,
+  payload: SetLogPayload,
+): Promise<void> {
   const seedsWeight = payload.drop_index == null || payload.drop_index === 1;
   // El bucket sale del propio set: un dropset/superserie loguea un drop_index
   // por serie, un set normal lo manda en NULL. Así el peso del primer drop no
@@ -197,8 +213,6 @@ export async function logSet(
       [athleteId, payload.exercise_id, payload.value, payload.unit, scheme],
     );
   }
-
-  return { setId: r.rows[0].id, created: r.rows[0].was_insert };
 }
 
 export async function getActive(

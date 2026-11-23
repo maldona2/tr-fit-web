@@ -61,7 +61,11 @@ import {
   useProgressionRuns,
   type ProgressionRun,
 } from '@/hooks/useProgressionRuns';
-import { useExerciseRotations } from '@/hooks/useExerciseRotations';
+import {
+  useExerciseRotations,
+  useRotationLock,
+} from '@/hooks/useExerciseRotations';
+import { Switch } from '@/components/ui/switch';
 import { useSetMonthlyFee } from '@/hooks/useSetMonthlyFee';
 import { useAthleteRms, useSetAthleteRm } from '@/hooks/useAthleteRms';
 import {
@@ -1200,14 +1204,42 @@ function ProgresionTab({ user }: { user: AdminUser }) {
 function RotacionesCard({ user }: { user: AdminUser }) {
   const q = useExerciseRotations(user.id);
   const rotations = q.data ?? [];
+  const lock = useRotationLock(user.id);
+  const locked = lock.query.data ?? false;
 
   return (
     <div className="overflow-hidden rounded-2xl border bg-card">
-      <div className="border-b border-border p-[18px]">
-        <Eyebrow variant="muted">Variaciones</Eyebrow>
-        <div className="mt-1 text-[17px] font-semibold tracking-tight">
-          Cambios automáticos de ejercicios
+      <div className="flex items-start justify-between gap-4 border-b border-border p-[18px]">
+        <div>
+          <Eyebrow variant="muted">Variaciones</Eyebrow>
+          <div className="mt-1 text-[17px] font-semibold tracking-tight">
+            Cambios automáticos de ejercicios
+          </div>
+          {locked && (
+            <div className="mt-1 text-sm text-muted-foreground">
+              Desactivados: la rutina no se modifica sola.
+            </div>
+          )}
         </div>
+        <label className="flex shrink-0 items-center gap-2 text-sm">
+          {locked ? 'Desactivados' : 'Activos'}
+          <Switch
+            checked={!locked}
+            disabled={lock.query.isLoading || lock.mutation.isPending}
+            onCheckedChange={(on) =>
+              lock.mutation.mutate(!on, {
+                onSuccess: () =>
+                  toast.success(
+                    on
+                      ? 'Cambios automáticos activados'
+                      : 'Cambios automáticos desactivados'
+                  ),
+                onError: () => toast.error('No se pudo guardar'),
+              })
+            }
+            aria-label="Cambios automáticos de ejercicios"
+          />
+        </label>
       </div>
       {q.isLoading ? (
         <div className="p-[18px]">

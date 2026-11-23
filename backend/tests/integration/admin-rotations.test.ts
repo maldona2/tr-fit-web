@@ -93,3 +93,27 @@ it('rejects non-admin users', async () => {
     .set('Authorization', `Bearer ${token}`);
   expect(res.status).toBe(403);
 });
+
+it('toggles the rotation lock', async () => {
+  const adminId = await createAdmin();
+  const token = signToken({ id: adminId, role: 'admin' });
+  const athleteId = await createAthlete(adminId);
+  const auth = { Authorization: `Bearer ${token}` };
+
+  const g = await request(app)
+    .get(`/api/admin/users/${athleteId}/rotation-lock`)
+    .set(auth);
+  expect(g.body).toEqual({ locked: false });
+
+  const p = await request(app)
+    .put(`/api/admin/users/${athleteId}/rotation-lock`)
+    .set(auth)
+    .send({ locked: true });
+  expect(p.body).toEqual({ locked: true });
+
+  const bad = await request(app)
+    .put(`/api/admin/users/${athleteId}/rotation-lock`)
+    .set(auth)
+    .send({ locked: 'yes' });
+  expect(bad.status).toBe(400);
+});

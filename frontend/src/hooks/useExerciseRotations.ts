@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
 export interface ExerciseRotation {
@@ -26,4 +26,30 @@ export function useExerciseRotations(userId: string | undefined) {
     },
     staleTime: 30_000,
   });
+}
+
+// Coach switch: freeze the automatic rotation (e.g. ACL rehab).
+export function useRotationLock(userId: string) {
+  const qc = useQueryClient();
+  const key = ['admin', 'rotation-lock', userId];
+  const query = useQuery({
+    queryKey: key,
+    queryFn: async (): Promise<boolean> => {
+      const r = await api.get<{ locked: boolean }>(
+        `/admin/users/${userId}/rotation-lock`
+      );
+      return r.data.locked;
+    },
+  });
+  const mutation = useMutation({
+    mutationFn: async (locked: boolean): Promise<boolean> => {
+      const r = await api.put<{ locked: boolean }>(
+        `/admin/users/${userId}/rotation-lock`,
+        { locked }
+      );
+      return r.data.locked;
+    },
+    onSuccess: (locked) => qc.setQueryData(key, locked),
+  });
+  return { query, mutation };
 }
