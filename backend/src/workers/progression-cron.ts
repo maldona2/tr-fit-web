@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { env } from '../config/env.js';
 import { runWeeklyProgressionForAll } from '../services/progression.service.js';
+import { closeStaleSessions } from '../services/session.service.js';
 import logger from '../utils/logger.js';
 
 let task: ReturnType<typeof cron.schedule> | null = null;
@@ -12,6 +13,10 @@ export function startProgressionCron(): void {
     async () => {
       logger.info('progression cron: running');
       try {
+        // Sesiones olvidadas abiertas: cerrarlas antes de progresar, si no la
+        // semana nueva arranca con una sesión colgada de la anterior.
+        const closed = await closeStaleSessions({ olderThanHours: 3 });
+        if (closed) logger.info({ closed }, 'progression cron: stale sessions closed');
         await runWeeklyProgressionForAll();
         logger.info('progression cron: done');
       } catch (e) {

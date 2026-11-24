@@ -41,11 +41,75 @@ interface StartSessionResult {
   items: Awaited<ReturnType<typeof buildTodaySession>>;
 }
 
+/**
+ * Cierra sesiones que quedaron abiertas (el atleta no tocó "Terminar").
+ * - Por atleta (`athleteId`): las que empezaron un día anterior en SU zona
+ *   horaria. Corre al iniciar / leer la sesión activa, así el lunes no queda
+ *   trabado con la sesión del domingo.
+ * - Barrido global (`olderThanHours`): las que llevan más de N horas abiertas.
+ *   Lo usa el cron del domingo antes de la progresión.
+ * Con series hechas se cierra como un finish normal (sin fatiga, finished_at =
+ * última serie). Sin ninguna serie hecha se borra: cerrarla marcaría el día
+ * como entrenado.
+ */
+export async function closeStaleSessions(
+  opts: { athleteId?: string; olderThanHours?: number; now?: Date },
+): Promise<number> {
+  const r = await pool.query<{
+    id: string; athlete_id: string; last_set_at: Date | null; started_at: Date;
+  }>(
+    `SELECT s.id, s.athlete_id, s.started_at,
+            (SELECT MAX(COALESCE(sl.client_ts, sl.synced_at)) FROM set_logs sl
+              WHERE sl.session_log_id = s.id AND sl.completed = TRUE) AS last_set_at
+       FROM session_logs s
+       JOIN users u ON u.id = s.athlete_id
+      WHERE s.finished_at IS NULL
+        AND ($1::uuid IS NULL OR s.athlete_id = $1)
+        AND (
+          ($2::int IS NULL
+            AND (s.started_at AT TIME ZONE u.timezone)::date
+                < (COALESCE($3::timestamptz, now()) AT TIME ZONE u.timezone)::date)
+          OR ($2::int IS NOT NULL
+            AND s.started_at < COALESCE($3::timestamptz, now()) - make_interval(hours => $2::int))
+        )`,
+    [opts.athleteId ?? null, opts.olderThanHours ?? null, opts.now ?? null],
+  );
+  for (const row of r.rows) {
+    try {
+      if (!row.last_set_at) {
+        await pool.query(
+          `UPDATE coach_alerts SET session_log_id = NULL WHERE session_log_id = $1`,
+          [row.id],
+        );
+        await pool.query(
+          `DELETE FROM session_logs WHERE id = $1 AND finished_at IS NULL`,
+          [row.id],
+        );
+      } else {
+        await finishSession(row.id, row.athlete_id, null, undefined, {
+          finishedAt: new Date(row.last_set_at),
+        });
+      }
+      logger.info(
+        { sessionId: row.id, athleteId: row.athlete_id, emptied: !row.last_set_at },
+        'stale session auto-closed',
+      );
+    } catch (e) {
+      // El atleta la cerró justo ahora: nada que hacer.
+      if (e instanceof SessionError && e.reason === 'already_finished') continue;
+      throw e;
+    }
+  }
+  return r.rows.length;
+}
+
 export async function startSession(
   athleteId: string,
   clientId: string,
   opts: { force?: boolean; dayOfWeek?: number; now?: Date } = {},
 ): Promise<StartSessionResult> {
+  await closeStaleSessions({ athleteId, now: opts.now });
+
   const stateR = await pool.query<{
     current_week: number; active_skeleton_id: string | null;
   }>(
@@ -227,6 +291,8 @@ export async function getActive(
     current_slot_index: number;
   } | null;
 }> {
+  await closeStaleSessions({ athleteId });
+
   const r = await pool.query<{
     id: string; day_of_week: number; started_at: string;
   }>(
@@ -361,8 +427,9 @@ async function closeWeekIfComplete(athleteId: string): Promise<void> {
 export async function finishSession(
   sessionId: string,
   athleteId: string,
-  fatigueRating: 'suave' | 'normal' | 'exigente',
+  fatigueRating: 'suave' | 'normal' | 'exigente' | null,
   note?: string,
+  opts: { finishedAt?: Date } = {},
 ): Promise<SessionSummary> {
   const client = await pool.connect();
   let summary: SessionSummary;
@@ -435,7 +502,7 @@ export async function finishSession(
     const compliancePct =
       setsTarget > 0 ? Math.min(100, (setsCompleted / setsTarget) * 100) : 0;
 
-    const now = new Date();
+    const now = opts.finishedAt ?? new Date();
     const durationSeconds = Math.floor(
       (now.getTime() - new Date(session.started_at).getTime()) / 1000,
     );
@@ -472,7 +539,7 @@ export async function finishSession(
 
     await client.query(
       `UPDATE session_logs
-         SET finished_at = NOW(),
+         SET finished_at = $8,
              fatigue_rating = $1,
              total_sets_completed = $2,
              compliance_pct = $3,
@@ -481,7 +548,7 @@ export async function finishSession(
              note = $6
        WHERE id = $7`,
       [fatigueRating, setsCompleted, compliancePct, totalVolumeKg,
-       durationSeconds, note?.trim() || null, sessionId],
+       durationSeconds, note?.trim() || null, sessionId, now],
     );
 
     await client.query('COMMIT');
