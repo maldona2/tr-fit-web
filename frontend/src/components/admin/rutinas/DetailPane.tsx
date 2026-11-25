@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { AxiosError } from 'axios';
-import { Pencil, RotateCcw } from 'lucide-react';
+import { Library, Pencil, RotateCcw } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -10,8 +10,10 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  useApplyRoutineTemplate,
   useApproveRutina,
   useDiscardRutina,
   useRejectRutina,
@@ -29,6 +31,7 @@ import { ActionFooter } from './ActionFooter';
 import { DiscardDialog } from './DiscardDialog';
 import { RejectDialog, type RejectPayload } from './RejectDialog';
 import { ShortcutsModal } from './ShortcutsModal';
+import { TemplatePickerDialog } from './TemplatePickerDialog';
 import type { SlotOverride } from './EditSlotPopover';
 import type { RutinaSlot } from '@/types/api';
 import {
@@ -56,6 +59,8 @@ export function DetailPane({
   const approve = useApproveRutina();
   const reject = useRejectRutina();
   const discard = useDiscardRutina();
+  const applyTemplate = useApplyRoutineTemplate();
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [tab, setTab] = useState<TabKey>('rutina');
   const [rejectOpen, setRejectOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -75,6 +80,7 @@ export function DetailPane({
     setTab('rutina');
     setRejectOpen(false);
     setDiscardOpen(false);
+    setTemplateOpen(false);
     const draft = loadRoutineDraft(id);
     setOverrides(draft?.overrides ?? {});
     setOrder(draft?.order ?? null);
@@ -156,7 +162,8 @@ export function DetailPane({
     setOrder(sorted);
   }
 
-  const modalOpen = rejectOpen || discardOpen || shortcutsOpen;
+  const modalOpen =
+    rejectOpen || discardOpen || shortcutsOpen || templateOpen;
 
   useRutinasHotkeys(
     {
@@ -194,6 +201,7 @@ export function DetailPane({
         if (rejectOpen) setRejectOpen(false);
         else if (discardOpen) setDiscardOpen(false);
         else if (shortcutsOpen) setShortcutsOpen(false);
+        else if (templateOpen) setTemplateOpen(false);
       },
     },
     { enabled: !!data }
@@ -293,6 +301,29 @@ export function DetailPane({
       onAdvance();
     } catch {
       toast.error('No se pudo rechazar');
+    }
+  }
+
+  async function onApplyTemplate(source: string) {
+    try {
+      await applyTemplate.mutateAsync({ id, source });
+      // Slot ids changed server-side; the local draft no longer applies.
+      clearRoutineDraft(id);
+      setOverrides({});
+      setOrder(null);
+      setDeleted(new Set());
+      setAddedIds(new Set());
+      setTemplateOpen(false);
+      toast.success('Rutina reemplazada');
+    } catch (e) {
+      const err = e as AxiosError<{ error?: string }>;
+      if (err.response?.status === 409) {
+        setTemplateOpen(false);
+        toast.info('Ya fue procesada · pasando a la siguiente');
+        onAdvance();
+      } else {
+        toast.error('No se pudo cambiar la rutina');
+      }
     }
   }
 
@@ -432,12 +463,24 @@ export function DetailPane({
         )}
 
         <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
-          <TabsList>
-            <TabsTrigger value="rutina">Rutina</TabsTrigger>
-            <TabsTrigger value="contexto">Contexto</TabsTrigger>
-            <TabsTrigger value="historial">Historial</TabsTrigger>
-            <TabsTrigger value="diff">Diff</TabsTrigger>
-          </TabsList>
+          <div className="flex flex-wrap items-center gap-2">
+            <TabsList>
+              <TabsTrigger value="rutina">Rutina</TabsTrigger>
+              <TabsTrigger value="contexto">Contexto</TabsTrigger>
+              <TabsTrigger value="historial">Historial</TabsTrigger>
+              <TabsTrigger value="diff">Diff</TabsTrigger>
+            </TabsList>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={() => setTemplateOpen(true)}
+            >
+              <Library size={14} className="mr-1.5" />
+              Elegir rutina
+            </Button>
+          </div>
           <div className="mt-5">
             <TabsContent value="rutina">
               <DndContext
@@ -497,6 +540,15 @@ export function DetailPane({
         athleteName={data.profile.name}
         onConfirm={onDiscard}
         submitting={discard.isPending}
+      />
+
+      <TemplatePickerDialog
+        open={templateOpen}
+        onOpenChange={setTemplateOpen}
+        profile={data.profile}
+        current={data.skeleton.generation_prompt?.template}
+        onConfirm={onApplyTemplate}
+        submitting={applyTemplate.isPending}
       />
 
       <ShortcutsModal open={shortcutsOpen} onOpenChange={setShortcutsOpen} />

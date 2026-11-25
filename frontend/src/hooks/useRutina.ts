@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import type { RutinaDetail } from '@/types/api';
+import type { RoutineTemplateSummary, RutinaDetail } from '@/types/api';
 
 export type SlotOverridePayload = {
   slot_id: string;
@@ -94,6 +94,33 @@ export function useRejectRutina() {
       return r.data;
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rutinas'] });
+    },
+  });
+}
+
+export function useRoutineTemplates(enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'rutinas', 'templates'],
+    enabled,
+    staleTime: Infinity,
+    queryFn: async (): Promise<RoutineTemplateSummary[]> => {
+      const r = await api.get<RoutineTemplateSummary[]>(
+        '/admin/rutinas/templates'
+      );
+      return r.data;
+    },
+  });
+}
+
+export function useApplyRoutineTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, source }: { id: string; source: string }) => {
+      await api.post(`/admin/rutinas/${id}/template`, { source });
+    },
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'rutina', id] });
       qc.invalidateQueries({ queryKey: ['admin', 'rutinas'] });
     },
   });
