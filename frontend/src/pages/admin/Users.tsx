@@ -38,12 +38,7 @@ import { toast } from 'sonner';
 import type { AdminUser, Role, UserStatus } from '@/types/api';
 
 export type SortKey =
-  | 'usuario'
-  | 'estado'
-  | 'membresia'
-  | 'vence'
-  | 'mes'
-  | 'cuota';
+  'usuario' | 'estado' | 'membresia' | 'vence' | 'mes' | 'cuota';
 export type SortDir = 'asc' | 'desc';
 export interface Sort {
   key: SortKey;
@@ -109,8 +104,10 @@ export function sortUsers(users: AdminUser[], sorts: Sort[]): AdminUser[] {
   const sinkRejected = !sorts.some((s) => s.key === 'estado');
   return [...users].sort((a, b) => {
     if (sinkRejected) {
-      const aOut = a.status === 'rejected' && a.membership_status !== 'vacation';
-      const bOut = b.status === 'rejected' && b.membership_status !== 'vacation';
+      const aOut =
+        a.status === 'rejected' && a.membership_status !== 'vacation';
+      const bOut =
+        b.status === 'rejected' && b.membership_status !== 'vacation';
       if (aOut !== bOut) return aOut ? 1 : -1;
     }
     if (athleteOnly) {
@@ -428,9 +425,9 @@ function UsersTable({
           amount={feeOf(charging)}
           pending={registerPayment.isPending}
           onClose={() => setCharging(null)}
-          onConfirm={() =>
+          onConfirm={(payload) =>
             registerPayment.mutate(
-              { id: charging.id, amount: feeOf(charging), method: 'transfer' },
+              { id: charging.id, method: 'transfer', ...payload },
               {
                 onSuccess: () => {
                   setCharging(null);

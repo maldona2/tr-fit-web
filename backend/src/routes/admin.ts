@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/role.js';
 import {
   registerPayment,
+  isPeriodMonths,
   registerVacation,
   cancelMembership,
   pauseMembership,
@@ -639,6 +640,7 @@ const paymentBody = z.object({
   paid_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   reference: z.string().max(200).optional(),
   period_days: z.number().int().min(1).max(366).optional(),
+  period_months: z.number().int().optional(),
   covers_until: z.string().datetime().optional(),
 });
 
@@ -648,6 +650,12 @@ router.post('/users/:id/payments', async (req: Request, res: Response) => {
   const parsed = paymentBody.safeParse(req.body);
   if (!parsed.success)
     return res.status(400).json({ error: 'invalid_payload' });
+  if (
+    parsed.data.period_months != null &&
+    !isPeriodMonths(parsed.data.period_months)
+  ) {
+    return res.status(400).json({ error: 'invalid_payload' });
+  }
   const before = await getUser(req.params.id);
   if (!before) return res.status(404).json({ error: 'not_found' });
 
@@ -658,6 +666,7 @@ router.post('/users/:id/payments', async (req: Request, res: Response) => {
     paidAt: parsed.data.paid_at,
     reference: parsed.data.reference ?? null,
     periodDays: parsed.data.period_days,
+    periodMonths: parsed.data.period_months,
     coversUntil: parsed.data.covers_until,
     recordedBy: req.user!.id,
   });
@@ -672,6 +681,7 @@ router.post('/users/:id/payments', async (req: Request, res: Response) => {
       amount: parsed.data.amount,
       method: parsed.data.method,
       paid_until: membership.paid_until,
+      period_months: parsed.data.period_months ?? 1,
     },
   });
 
@@ -684,13 +694,20 @@ router.post('/users/:id/payments', async (req: Request, res: Response) => {
 // Send the user the same 6-digit reset code as the app's forgot-password
 // flow, but tell the admin when the mail service fails (the public endpoint
 // hides it for anti-enumeration).
-router.post('/users/:id/password-reset', async (req: Request, res: Response) => {
-  const user = await getUser(req.params.id);
-  if (!user) return res.status(404).json({ error: 'not_found' });
-  const { emailSendFailed } = await forgotPassword(user.email, req.ip ?? null);
-  if (emailSendFailed) return res.status(502).json({ error: 'email_send_failed' });
-  res.json({ ok: true, email: user.email });
-});
+router.post(
+  '/users/:id/password-reset',
+  async (req: Request, res: Response) => {
+    const user = await getUser(req.params.id);
+    if (!user) return res.status(404).json({ error: 'not_found' });
+    const { emailSendFailed } = await forgotPassword(
+      user.email,
+      req.ip ?? null
+    );
+    if (emailSendFailed)
+      return res.status(502).json({ error: 'email_send_failed' });
+    res.json({ ok: true, email: user.email });
+  }
+);
 
 // Kill every active session of a user. Takes effect at the next token refresh
 // (access tokens keep working until they expire, ≤15m).

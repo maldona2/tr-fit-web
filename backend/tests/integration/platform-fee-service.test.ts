@@ -11,6 +11,7 @@ import {
   updateConfig,
   getActiveAthleteRevenue,
   getAthleteBillingRevenue,
+  getAthleteBillingBreakdown,
   computeCurrent,
   previewAdjustment,
   applyAdjustment,
@@ -19,6 +20,7 @@ import {
   recordCurrentPayment,
 } from '../../src/services/platform-fee.service.js';
 import { setAthleteMonthlyFee } from '../../src/services/admin.service.js';
+import { registerPayment } from '../../src/services/membership.service.js';
 
 // resetDatabase() (shared helper) does not truncate the platform-fee tables, so
 // reset them here to keep each test isolated from prior config mutations and
@@ -203,6 +205,40 @@ describe('platform fee service', () => {
     expect(h).toHaveLength(1);
     expect(h[0].period).toBe('2026-05-01');
     expect(h[0].total_ars).toBe(106000);
+  });
+
+  it('quarterly lump sum hits the 4% in the payment month and 0 in leftover months', async () => {
+    const coach = await createAdmin();
+    const a = await createAthlete(coach);
+    await setAthleteMonthlyFee(a, 25000, coach);
+    await registerPayment(a, {
+      amount: 75000,
+      method: 'transfer',
+      paidAt: '2026-06-15',
+      periodMonths: 3,
+      recordedBy: coach,
+    });
+
+    const june = await getAthleteBillingRevenue('2026-06-20');
+    expect(june.realArs).toBe(75000);
+    expect(june.realCount).toBe(1);
+    expect(june.estimatedArs).toBe(25000);
+
+    const july = await getAthleteBillingRevenue('2026-07-20');
+    expect(july.realArs).toBe(0);
+    expect(july.realCount).toBe(0);
+    expect(july.estimatedArs).toBe(25000);
+    expect(july.coveredArs).toBe(25000);
+    expect(july.coveredCount).toBe(1);
+
+    const aug = await getAthleteBillingRevenue('2026-08-20');
+    expect(aug.realArs).toBe(0);
+    expect(aug.estimatedArs).toBe(25000);
+
+    const rows = await getAthleteBillingBreakdown('2026-07-20');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].billed_ars).toBe(0);
+    expect(rows[0].in_real).toBe(true);
   });
 
   it('records payment against the invoice (current) month', async () => {

@@ -169,14 +169,17 @@ export interface RegisterPaymentInput {
   method?: 'transfer' | 'cash' | 'mercadopago' | 'other';
   paid_at?: string; // 'YYYY-MM-DD', defaults to today
   period_days?: number; // defaults to 30 on the backend
+  /** 1 = monthly, 3 = quarterly, 6 = semiannual, 12 = annual. */
+  period_months?: 1 | 3 | 6 | 12;
   reference?: string;
 }
 
 /**
  * Logs the payment (booked to paid_at's month for revenue), extends the
- * membership (period_days if given, else one calendar month), and re-approves.
- * The only path that grants or extends access — see upsertManualSubscription.
- * Refreshes the users list so the row re-sorts and flips to PAGADO.
+ * membership (period_months calendar months, or period_days, else one month),
+ * and re-approves. The only path that grants or extends access — see
+ * upsertManualSubscription. Refreshes the users list so the row re-sorts and
+ * flips to PAGADO. Also refreshes the platform-fee invoice.
  */
 export function useRegisterPayment() {
   const qc = useQueryClient();
@@ -185,7 +188,11 @@ export function useRegisterPayment() {
       id,
       ...input
     }: RegisterPaymentInput & { id: string }): Promise<void> => {
-      const paid_at = input.paid_at ?? new Date().toISOString().slice(0, 10);
+      const paid_at =
+        input.paid_at ??
+        new Date().toLocaleDateString('en-CA', {
+          timeZone: 'America/Argentina/Buenos_Aires',
+        });
       await api.post(`/admin/users/${id}/payments`, {
         method: 'transfer',
         ...input,
@@ -196,6 +203,7 @@ export function useRegisterPayment() {
       qc.invalidateQueries({ queryKey: ['admin', 'user', id] });
       qc.invalidateQueries({ queryKey: ['admin', 'users'] });
       qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
+      qc.invalidateQueries({ queryKey: ['platform-fee'] });
     },
   });
 }

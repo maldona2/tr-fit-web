@@ -124,7 +124,14 @@ export async function ensureMigrated(): Promise<void> {
                WHERE table_schema = 'public'
                  AND table_name = 'exercises'
                  AND column_name = 'default_series'
-            ) AS exercise_default_series`
+            ) AS exercise_default_series,
+            EXISTS (
+              SELECT 1
+                FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'payments'
+                 AND column_name = 'period_months'
+            ) AS pay_period_months`
   );
   if (
     !r.rows[0].e ||
@@ -137,7 +144,8 @@ export async function ensureMigrated(): Promise<void> {
     !r.rows[0].m065 ||
     !r.rows[0].pay_kind ||
     !r.rows[0].community_shadow ||
-    !r.rows[0].exercise_default_series
+    !r.rows[0].exercise_default_series ||
+    !r.rows[0].pay_period_months
   ) {
     execSync('npm run db:migrate', { stdio: 'inherit', env: childEnv });
   }

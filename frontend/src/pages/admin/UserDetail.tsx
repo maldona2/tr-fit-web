@@ -354,7 +354,8 @@ function usePasswordResetAction(user: AdminUser) {
   const m = useSendPasswordReset(user.id);
   const onClick = () =>
     m.mutate(undefined, {
-      onSuccess: () => toast.success(`Código de reseteo enviado a ${user.email}`),
+      onSuccess: () =>
+        toast.success(`Código de reseteo enviado a ${user.email}`),
       onError: (e) =>
         toast.error(`No se pudo enviar el email: ${(e as Error).message}`),
     });
@@ -698,12 +699,12 @@ function MembresiaCard({ user }: { user: AdminUser }) {
       amount={user.monthly_fee_ars ?? 25000}
       pending={registerPayment.isPending}
       onClose={() => setConfirmPayment(false)}
-      onConfirm={() =>
+      onConfirm={(payload) =>
         registerPayment.mutate(
           {
             id: user.id,
-            amount: user.monthly_fee_ars ?? 25000,
             method: 'transfer',
+            ...payload,
           },
           {
             onSuccess: () => {
@@ -840,7 +841,7 @@ function MembresiaTab({ user }: { user: AdminUser }) {
           </div>
         </div>
         <div className="p-[18px]">
-          {/* Cuota mensual — drives the platform 4% */}
+          {/* Cuota mensual — default for a monthly payment; prepaid uses cuota × months */}
           <div className="flex flex-col gap-1">
             <label className="text-xs text-muted-foreground">
               Cuota mensual (ARS){' '}
@@ -885,8 +886,9 @@ function MembresiaTab({ user }: { user: AdminUser }) {
 
       <p className="text-xs text-muted-foreground">
         Para dar de alta, renovar o volver de vacaciones usá "Registrar pago"
-        arriba: es lo que habilita el acceso. "Pago por vacaciones" cobra el
-        mantenimiento y lo deja pausado.
+        arriba: es lo que habilita el acceso. Ahí elegís mensual, trimestral,
+        semestral o anual; un período largo se factura una sola vez. "Pago por
+        vacaciones" cobra el mantenimiento y lo deja pausado.
       </p>
     </div>
   );
