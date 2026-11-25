@@ -223,6 +223,8 @@ describe('user detail register payment', () => {
     expect(mocks.registerPayment).toHaveBeenCalledTimes(1);
     expect(mocks.registerPayment.mock.calls[0][0]).toMatchObject({
       id: 'new-athlete-id',
+      amount: 25000,
+      period_months: 1,
     });
   });
 });

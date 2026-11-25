@@ -15,7 +15,10 @@ export interface PlatformFeeSummary {
   /** Current-month real gross (next invoice's 4% preview). */
   current_real_ars: number;
   current_real_athletes: number;
-  /** current real / current estimated × 100. */
+  /** Coverage this month (includes prepaid leftover). */
+  covered_ars: number;
+  covered_athletes: number;
+  /** covered / estimated × 100. */
   collection_pct: number;
   revenue_share_pct: number;
   revenue_share_ars: number;
@@ -94,6 +97,7 @@ export interface AthleteBillingRow {
   athlete_id: string;
   name: string;
   fee_ars: number;
+  billed_ars: number;
   membership_status: string;
   paid_until: string;
   in_real: boolean;

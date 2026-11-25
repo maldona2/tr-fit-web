@@ -28,7 +28,7 @@ export function addCalendarMonth(base: Date, months = 1): Date {
 /** Access gate: paid_until + 48h grace still grants access. */
 export function isActiveWithGrace(
   paidUntil: string | number | null | undefined,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): boolean {
   if (paidUntil == null) return false;
   if (paidUntil === Infinity || paidUntil === 'infinity') return true;
@@ -43,11 +43,21 @@ export function isActive(m: Pick<Membership, 'paid_until'> | null): boolean {
   return new Date(m.paid_until).getTime() > Date.now();
 }
 
-export async function getMembership(userId: string): Promise<Membership | null> {
+export async function getMembership(
+  userId: string
+): Promise<Membership | null> {
   const r = await pool.query<Membership>(
-    `SELECT * FROM memberships WHERE user_id = $1`, [userId],
+    `SELECT * FROM memberships WHERE user_id = $1`,
+    [userId]
   );
   return r.rows[0] ?? null;
+}
+
+export const PERIOD_MONTHS = [1, 3, 6, 12] as const;
+export type PeriodMonths = (typeof PERIOD_MONTHS)[number];
+
+export function isPeriodMonths(n: number): n is PeriodMonths {
+  return (PERIOD_MONTHS as readonly number[]).includes(n);
 }
 
 export interface RegisterPaymentInput {
@@ -56,8 +66,10 @@ export interface RegisterPaymentInput {
   method: PaymentMethod;
   paidAt: string; // 'YYYY-MM-DD'
   reference?: string | null;
-  periodDays?: number; // default 30; ignored if coversUntil given
-  coversUntil?: string; // explicit ISO end; overrides periodDays
+  periodDays?: number; // default 30; ignored if coversUntil or periodMonths given
+  /** 1 = monthly, 3 = quarterly, 6 = semiannual, 12 = annual. */
+  periodMonths?: PeriodMonths;
+  coversUntil?: string; // explicit ISO end; overrides periodDays / periodMonths
   recordedBy?: string | null;
 }
 
@@ -67,7 +79,7 @@ export interface RegisterPaymentInput {
  */
 export async function registerPayment(
   userId: string,
-  input: RegisterPaymentInput,
+  input: RegisterPaymentInput
 ): Promise<Membership> {
   const client = await pool.connect();
   try {
@@ -77,7 +89,8 @@ export async function registerPayment(
       paid_until: string | number | null;
       status: string;
     }>(
-      `SELECT paid_until, status FROM memberships WHERE user_id = $1 FOR UPDATE`, [userId],
+      `SELECT paid_until, status FROM memberships WHERE user_id = $1 FOR UPDATE`,
+      [userId]
     );
     // Extend from the later of current paid_until or now() (renewal vs top-up).
     // Vacation coverage is data-maintenance, not prepaid training: the cuota
@@ -95,20 +108,33 @@ export async function registerPayment(
 
     // Extension policy (from `base` = later of current expiry or now):
     //   1. explicit coversUntil  → use as-is
-    //   2. explicit periodDays   → +N days (custom-period callers, unchanged)
-    //   3. default               → +1 calendar month (same day next month,
+    //   2. periodMonths (1/3/6/12) → +N calendar months (promo / prepaid)
+    //   3. explicit periodDays   → +N days (custom-period callers, unchanged)
+    //   4. default               → +1 calendar month (same day next month,
     //      clamped) so renewals track the calendar, e.g. 6/07 → 6/08.
+    const periodMonths = input.periodMonths ?? 1;
     const coversUntil = input.coversUntil
       ? new Date(input.coversUntil)
-      : input.periodDays != null
-        ? new Date(base.getTime() + input.periodDays * 86_400_000)
-        : addCalendarMonth(base);
+      : input.periodMonths != null
+        ? addCalendarMonth(base, input.periodMonths)
+        : input.periodDays != null
+          ? new Date(base.getTime() + input.periodDays * 86_400_000)
+          : addCalendarMonth(base);
 
     await client.query(
-      `INSERT INTO payments (user_id, paid_at, amount, currency, method, reference, covers_until, recorded_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [userId, input.paidAt, input.amount, input.currency ?? 'ARS', input.method,
-       input.reference ?? null, coversUntil.toISOString(), input.recordedBy ?? null],
+      `INSERT INTO payments (user_id, paid_at, amount, currency, method, reference, covers_until, recorded_by, period_months)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        userId,
+        input.paidAt,
+        input.amount,
+        input.currency ?? 'ARS',
+        input.method,
+        input.reference ?? null,
+        coversUntil.toISOString(),
+        input.recordedBy ?? null,
+        periodMonths,
+      ]
     );
 
     const m = await client.query<Membership>(
@@ -117,10 +143,12 @@ export async function registerPayment(
        ON CONFLICT (user_id) DO UPDATE
          SET status = 'active', paid_until = $2, paused_at = NULL, updated_at = now()
        RETURNING *`,
-      [userId, coversUntil.toISOString()],
+      [userId, coversUntil.toISOString()]
     );
 
-    await client.query(`UPDATE users SET status = 'approved' WHERE id = $1`, [userId]);
+    await client.query(`UPDATE users SET status = 'approved' WHERE id = $1`, [
+      userId,
+    ]);
 
     // Auto-resolve open billing alerts for this athlete (renewal clears them).
     await client.query(
@@ -129,7 +157,7 @@ export async function registerPayment(
         WHERE athlete_id = $1
           AND type IN ('membership_expiring','membership_overdue')
           AND resolved_at IS NULL`,
-      [userId],
+      [userId]
     );
 
     await client.query('COMMIT');
@@ -143,7 +171,9 @@ export async function registerPayment(
 }
 
 export class MembershipError extends Error {
-  constructor(public code: 'not_active' | 'not_paused' | 'invalid_date' | 'invalid_amount') {
+  constructor(
+    public code: 'not_active' | 'not_paused' | 'invalid_date' | 'invalid_amount'
+  ) {
     super(code);
   }
 }
@@ -189,7 +219,7 @@ export interface RegisterVacationInput {
  */
 export async function registerVacation(
   userId: string,
-  input: RegisterVacationInput,
+  input: RegisterVacationInput
 ): Promise<Membership> {
   const until = paidUntilOnCalendarDate(input.paidUntil);
   const client = await pool.connect();
@@ -197,17 +227,32 @@ export async function registerVacation(
     await client.query('BEGIN');
 
     if (input.recordPayment) {
-      if (input.amount == null || !Number.isFinite(input.amount) || input.amount < 0) {
+      if (
+        input.amount == null ||
+        !Number.isFinite(input.amount) ||
+        input.amount < 0
+      ) {
         throw new MembershipError('invalid_amount');
       }
-      const paidAt = input.paidAt
-        ?? new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+      const paidAt =
+        input.paidAt ??
+        new Date().toLocaleDateString('en-CA', {
+          timeZone: 'America/Argentina/Buenos_Aires',
+        });
       await client.query(
         `INSERT INTO payments
            (user_id, paid_at, amount, currency, method, reference, covers_until, recorded_by, kind)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'vacation')`,
-        [userId, paidAt, input.amount, input.currency ?? 'ARS', input.method ?? 'transfer',
-         'Mantenimiento de datos', until.toISOString(), input.recordedBy ?? null],
+        [
+          userId,
+          paidAt,
+          input.amount,
+          input.currency ?? 'ARS',
+          input.method ?? 'transfer',
+          'Mantenimiento de datos',
+          until.toISOString(),
+          input.recordedBy ?? null,
+        ]
       );
     }
 
@@ -217,7 +262,7 @@ export async function registerVacation(
        ON CONFLICT (user_id) DO UPDATE
          SET status = 'vacation', paid_until = $2, paused_at = NULL, updated_at = now()
        RETURNING *`,
-      [userId, until.toISOString()],
+      [userId, until.toISOString()]
     );
 
     await client.query('COMMIT');
@@ -240,7 +285,7 @@ export async function pauseMembership(userId: string): Promise<Membership> {
         SET status = 'paused', paused_at = now(), updated_at = now()
       WHERE user_id = $1 AND status IN ('active', 'expiring')
       RETURNING *`,
-    [userId],
+    [userId]
   );
   if (!r.rows[0]) throw new MembershipError('not_active');
   return r.rows[0];
@@ -257,7 +302,7 @@ export async function resumeMembership(userId: string): Promise<Membership> {
             status = 'active', paused_at = NULL, updated_at = now()
       WHERE user_id = $1 AND status = 'paused'
       RETURNING *`,
-    [userId],
+    [userId]
   );
   if (!r.rows[0]) throw new MembershipError('not_paused');
   return r.rows[0];
@@ -267,6 +312,6 @@ export async function cancelMembership(userId: string): Promise<void> {
   await pool.query(
     `UPDATE memberships SET status = 'cancelled', paid_until = now(), updated_at = now()
       WHERE user_id = $1`,
-    [userId],
+    [userId]
   );
 }

@@ -76,6 +76,7 @@ export default function PlatformFee() {
   const collectionPct = summary.collection_pct ?? 0;
   const currentRealArs = summary.current_real_ars ?? 0;
   const estimatedArs = summary.gross_estimated_ars ?? 0;
+  const coveredArs = summary.covered_ars ?? currentRealArs;
 
   async function onMarkPaid() {
     const ok = window.confirm(
@@ -243,8 +244,10 @@ export default function PlatformFee() {
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
           Se acumula todo el mes (día 1 al último). El{' '}
-          {summary.revenue_share_pct}% de este real entra en la factura de{' '}
-          {nextInvoiceMonthLabel} (vence el 10). No se pierde nada.
+          {summary.revenue_share_pct}% del real facturado entra en la factura de{' '}
+          {nextInvoiceMonthLabel} (vence el 10). Un trimestre/semestre/año
+          cuenta entero el mes del pago; los meses cubiertos no se vuelven a
+          facturar.
         </p>
         <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <div className="text-2xl font-extrabold tabular-nums">
@@ -254,7 +257,7 @@ export default function PlatformFee() {
             %
           </div>
           <div className="text-sm text-muted-foreground">
-            cobrado vs estimado
+            al día vs estimado
           </div>
         </div>
         <div
@@ -283,7 +286,7 @@ export default function PlatformFee() {
             </dd>
           </div>
           <div className="flex justify-between gap-2 sm:flex-col sm:justify-start">
-            <dt className="text-muted-foreground">Real cobrado</dt>
+            <dt className="text-muted-foreground">Facturado (4%)</dt>
             <dd className="font-semibold tabular-nums">
               {fmtARS(currentRealArs)}
               <span className="ml-1 font-normal text-muted-foreground">
@@ -294,7 +297,7 @@ export default function PlatformFee() {
           <div className="flex justify-between gap-2 sm:flex-col sm:justify-start">
             <dt className="text-muted-foreground">Pendiente</dt>
             <dd className="font-semibold tabular-nums">
-              {fmtARS(Math.max(0, estimatedArs - currentRealArs))}
+              {fmtARS(Math.max(0, estimatedArs - coveredArs))}
             </dd>
           </div>
         </dl>
@@ -319,10 +322,10 @@ export default function PlatformFee() {
         </summary>
         <p className="mt-2 text-xs text-muted-foreground">
           <strong>Estimado</strong> = todos los alumnos con membresía activa
-          (paguen o no este ciclo). <strong>Real</strong> = ya renovaron con
-          vencimiento después de fin de mes; solo estos entran en el "Real
-          cobrado" y en el 4%. (No incluye precio base ni cantidad de referidos
-          — la app no lleva ese dato, solo la cuota final.)
+          (paguen o no este ciclo). <strong>Real</strong> = lo facturado este
+          mes (un trimestre/semestre/año cuenta entero el mes del pago).{' '}
+          <strong>Prepago</strong> = cubiertos por un pago anterior; no entran
+          en el 4% de este mes.
         </p>
         {!breakdown || breakdown.length === 0 ? (
           <div className="mt-3 text-sm text-muted-foreground">Sin datos.</div>
@@ -333,6 +336,7 @@ export default function PlatformFee() {
                 <tr className="text-left text-xs uppercase text-muted-foreground">
                   <th className="py-1">Alumno</th>
                   <th className="py-1 text-right">Cuota</th>
+                  <th className="py-1 text-right">Facturado</th>
                   <th className="py-1">Estado</th>
                   <th className="py-1">Vence</th>
                   <th className="py-1 text-right">Pool</th>
@@ -344,6 +348,9 @@ export default function PlatformFee() {
                     <td className="py-1.5">{row.name}</td>
                     <td className="py-1.5 text-right tabular-nums">
                       {fmtARS(row.fee_ars)}
+                    </td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {fmtARS(row.billed_ars)}
                     </td>
                     <td className="py-1.5 text-muted-foreground">
                       {row.membership_status}
@@ -357,12 +364,14 @@ export default function PlatformFee() {
                       <span
                         className={
                           'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ' +
-                          (row.in_real
+                          (billingPool(row) === 'Real'
                             ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-                            : 'bg-muted text-muted-foreground')
+                            : billingPool(row) === 'Prepago'
+                              ? 'bg-sky-500/15 text-sky-700 dark:text-sky-400'
+                              : 'bg-muted text-muted-foreground')
                         }
                       >
-                        {row.in_real ? 'Real' : 'Solo estimado'}
+                        {billingPool(row)}
                       </span>
                     </td>
                   </tr>
@@ -559,16 +568,26 @@ function ddmmyyyy(isoDate: string): string {
   return `${d}/${m}/${y}`;
 }
 
+function billingPool(row: {
+  billed_ars: number;
+  in_real: boolean;
+}): 'Real' | 'Prepago' | 'Solo estimado' {
+  if (row.billed_ars > 0) return 'Real';
+  if (row.in_real) return 'Prepago';
+  return 'Solo estimado';
+}
+
 function exportBreakdownCsv(
   rows: {
     name: string;
     fee_ars: number;
+    billed_ars: number;
     membership_status: string;
     paid_until: string;
     in_real: boolean;
   }[]
 ) {
-  const header = 'Nombre,Estado,Vencimiento,Precio,Pool\n';
+  const header = 'Nombre,Estado,Vencimiento,Precio,Facturado,Pool\n';
   const lines = rows
     .map((r) =>
       [
@@ -578,7 +597,8 @@ function exportBreakdownCsv(
           ? 'Sin vencimiento'
           : ddmmyyyy(r.paid_until),
         r.fee_ars,
-        r.in_real ? 'Real' : 'Solo estimado',
+        r.billed_ars,
+        billingPool(r),
       ].join(',')
     )
     .join('\n');

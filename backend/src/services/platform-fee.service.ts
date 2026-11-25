@@ -55,7 +55,10 @@ export interface PlatformFeeSummary {
   /** Current month real gross (next invoice's 4% preview). */
   current_real_ars: number;
   current_real_athletes: number;
-  /** current real / current estimated × 100. */
+  /** Coverage this month (paid_until), including prepaid leftover. */
+  covered_ars: number;
+  covered_athletes: number;
+  /** covered / estimated × 100 (al día, not the 4% base). */
   collection_pct: number;
   revenue_share_pct: number;
   revenue_share_ars: number;
@@ -199,19 +202,71 @@ function billingTodayISO(todayISO?: string): string {
  * Shared with admin.service's dashboard KPIs so both price an athlete the same. */
 export const FEE_EXPR = `COALESCE(u.monthly_fee_ars, ap.monthly_fee_ars, 25000)`;
 
+/** Coverage for this calendar month (paid_until reaches next month, or infinity). */
+const IN_REAL = `(m.paid_until = 'infinity'
+            OR m.paid_until >= (date_trunc('month', $1::date) + interval '1 month'))`;
+
+/**
+ * 4% books the money actually invoiced this calendar month:
+ *   - membership payments with paid_at in this month → SUM(amount)
+ *     (a quarterly 75k counts as 75k once, not 25k × 3)
+ *   - leftover prepaid (period_months > 1 from an earlier month that still
+ *     covers this month) → 0
+ *   - otherwise, if still covered (monthly / infinity / tests) → monthly fee
+ *
+ * Joins `ptm` (payments this month) and `pl` (prepaid leftover).
+ */
+const BILLED_EXPR = `CASE
+         WHEN ptm.amount IS NOT NULL THEN ptm.amount
+         WHEN pl.leftover THEN 0
+         WHEN ${IN_REAL} THEN ${FEE_EXPR}
+         ELSE 0
+       END`;
+
+const IN_BILLED_POOL = `(ptm.amount IS NOT NULL OR ((${IN_REAL}) AND pl.leftover IS NULL))`;
+
+/** FROM/JOIN for estimated athletes + this-month payments + leftover prepaid. */
+const BILLING_FROM = `
+       FROM users u
+       LEFT JOIN athlete_profiles ap ON ap.user_id = u.id
+       JOIN memberships m ON m.user_id = u.id
+       LEFT JOIN LATERAL (
+         SELECT SUM(p.amount) AS amount
+           FROM payments p
+          WHERE p.user_id = u.id
+            AND p.kind = 'membership'
+            AND p.paid_at >= date_trunc('month', $1::date)::date
+            AND p.paid_at < (date_trunc('month', $1::date) + interval '1 month')::date
+       ) ptm ON true
+       LEFT JOIN LATERAL (
+         SELECT true AS leftover
+           FROM payments p
+          WHERE p.user_id = u.id
+            AND p.kind = 'membership'
+            AND p.period_months > 1
+            AND p.paid_at < date_trunc('month', $1::date)::date
+            AND p.covers_until >= (date_trunc('month', $1::date) + interval '1 month')
+          LIMIT 1
+       ) pl ON true
+      WHERE u.role = 'athlete'
+        AND u.status = 'approved'
+        AND m.status NOT IN ('cancelled', 'paused', 'vacation')`;
+
 /**
  * Estimated pool: approved athletes with a membership that is still on the
  * books (not cancelled/paused/vacation) — includes expired and mid-month actives who
  * have not renewed yet.
  *
- * Real pool: subset already paid for the current calendar month
- * (paid_until >= start of next month, or infinity). The 4% fee uses real only.
+ * Real / 4% pool: money invoiced this calendar month (see BILLED_EXPR). Prepaid
+ * leftover months stay covered for access (in_real) but do not enter the 4%.
  */
 export async function getAthleteBillingRevenue(todayISO?: string): Promise<{
   realCount: number;
   realArs: number;
   estimatedCount: number;
   estimatedArs: number;
+  coveredCount: number;
+  coveredArs: number;
 }> {
   const today = billingTodayISO(todayISO);
   const r = await pool.query<{
@@ -219,24 +274,17 @@ export async function getAthleteBillingRevenue(todayISO?: string): Promise<{
     estimated_gross: string;
     real_n: number;
     real_gross: string;
+    covered_n: number;
+    covered_gross: string;
   }>(
     `SELECT
        COUNT(*)::int AS estimated_n,
        COALESCE(SUM(${FEE_EXPR}), 0) AS estimated_gross,
-       COUNT(*) FILTER (
-         WHERE m.paid_until = 'infinity'
-            OR m.paid_until >= (date_trunc('month', $1::date) + interval '1 month')
-       )::int AS real_n,
-       COALESCE(SUM(${FEE_EXPR}) FILTER (
-         WHERE m.paid_until = 'infinity'
-            OR m.paid_until >= (date_trunc('month', $1::date) + interval '1 month')
-       ), 0) AS real_gross
-       FROM users u
-       LEFT JOIN athlete_profiles ap ON ap.user_id = u.id
-       JOIN memberships m ON m.user_id = u.id
-      WHERE u.role = 'athlete'
-        AND u.status = 'approved'
-        AND m.status NOT IN ('cancelled', 'paused', 'vacation')`,
+       COUNT(*) FILTER (WHERE ${IN_BILLED_POOL})::int AS real_n,
+       COALESCE(SUM(${BILLED_EXPR}), 0) AS real_gross,
+       COUNT(*) FILTER (WHERE ${IN_REAL})::int AS covered_n,
+       COALESCE(SUM(${FEE_EXPR}) FILTER (WHERE ${IN_REAL}), 0) AS covered_gross
+       ${BILLING_FROM}`,
     [today]
   );
   const row = r.rows[0];
@@ -245,6 +293,8 @@ export async function getAthleteBillingRevenue(todayISO?: string): Promise<{
     estimatedArs: Number(row?.estimated_gross ?? 0),
     realCount: Number(row?.real_n ?? 0),
     realArs: Number(row?.real_gross ?? 0),
+    coveredCount: Number(row?.covered_n ?? 0),
+    coveredArs: Number(row?.covered_gross ?? 0),
   };
 }
 
@@ -260,6 +310,8 @@ export interface AthleteBillingRow {
   athlete_id: string;
   name: string;
   fee_ars: number;
+  /** Amount that enters this month's 4% (lump sum or monthly fee; 0 if prepaid leftover). */
+  billed_ars: number;
   membership_status: string;
   paid_until: string;
   in_real: boolean;
@@ -274,6 +326,7 @@ export async function getAthleteBillingBreakdown(
     id: string;
     name: string | null;
     fee: string;
+    billed: string;
     status: string;
     paid_until: Date | string;
     in_real: boolean;
@@ -281,15 +334,11 @@ export async function getAthleteBillingBreakdown(
     `SELECT u.id,
             COALESCE(NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), ''), ap.name) AS name,
             ${FEE_EXPR} AS fee,
+            ${BILLED_EXPR} AS billed,
             m.status,
             m.paid_until,
-            (m.paid_until = 'infinity'
-              OR m.paid_until >= (date_trunc('month', $1::date) + interval '1 month')) AS in_real
-       FROM users u
-       LEFT JOIN athlete_profiles ap ON ap.user_id = u.id
-       JOIN memberships m ON m.user_id = u.id
-      WHERE u.role = 'athlete' AND u.status = 'approved'
-        AND m.status NOT IN ('cancelled', 'paused', 'vacation')
+            ${IN_REAL} AS in_real
+       ${BILLING_FROM}
       ORDER BY fee DESC, name`,
     [today]
   );
@@ -297,6 +346,7 @@ export async function getAthleteBillingBreakdown(
     athlete_id: row.id,
     name: row.name ?? '(sin nombre)',
     fee_ars: Number(row.fee),
+    billed_ars: Number(row.billed),
     membership_status: row.status,
     paid_until: toISODate(row.paid_until),
     in_real: row.in_real,
@@ -489,7 +539,7 @@ export async function computeCurrent(
   const cur = await getAthleteBillingRevenue(today);
   const collectionPct =
     cur.estimatedArs > 0
-      ? Math.round((cur.realArs / cur.estimatedArs) * 1000) / 10
+      ? Math.round((cur.coveredArs / cur.estimatedArs) * 1000) / 10
       : 0;
 
   const payment = await getPaymentForPeriod(invoicePeriod);
@@ -509,6 +559,8 @@ export async function computeCurrent(
     estimated_athletes: cur.estimatedCount,
     current_real_ars: cur.realArs,
     current_real_athletes: cur.realCount,
+    covered_ars: cur.coveredArs,
+    covered_athletes: cur.coveredCount,
     collection_pct: collectionPct,
     invoice_period: invoicePeriod,
     revenue_period: revenuePeriod,

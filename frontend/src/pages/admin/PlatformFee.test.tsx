@@ -33,6 +33,8 @@ vi.mock('@/hooks/usePlatformFee', () => ({
         estimated_athletes: 13,
         current_real_ars: 250000,
         current_real_athletes: 10,
+        covered_ars: 250000,
+        covered_athletes: 10,
         collection_pct: 76,
         revenue_share_pct: 0,
         revenue_share_ars: 0,
