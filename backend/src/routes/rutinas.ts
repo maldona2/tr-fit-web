@@ -13,7 +13,14 @@ import {
   findSkeleton,
   listSlots,
   createPendingSkeleton,
+  replacePendingSkeletonContent,
 } from '../services/skeleton.service.js';
+import { z } from 'zod';
+import {
+  ROUTINE_TEMPLATES,
+  buildSkeletonFromTemplate,
+} from '../services/template.service.js';
+import { substituteUnavailableSlots } from '../services/exercise-substitution.service.js';
 import { listExercisesForAthlete, listExercises } from '../services/exercise.service.js';
 import { generateRoutine } from '../services/routine-generation.service.js';
 import { listStuckGenerations } from '../services/generation-health.service.js';
@@ -32,6 +39,73 @@ router.get('/pending', async (req, res) => {
 router.get('/pending/stuck', async (req, res) => {
   const list = await listStuckGenerations(req.user!.id);
   res.json(list);
+});
+
+// Coach's base routines, so the admin can override the automatic pick.
+router.get('/templates', (_req, res) => {
+  res.json(
+    ROUTINE_TEMPLATES.map((t) => ({
+      source: t.source,
+      gender: t.gender,
+      days: t.days,
+      leg_days: t.leg_days,
+    })),
+  );
+});
+
+const useTemplatePayload = z.object({ source: z.string().min(1) });
+
+// Replaces a pending routine with a coach template chosen by the admin.
+// Exercises the athlete can't do are swapped the same deterministic way as
+// generation; ones with no replacement are dropped and listed in the
+// rationale. No AI call: the admin owns this choice.
+router.post('/:id/template', async (req, res) => {
+  const parsed = useTemplatePayload.safeParse(req.body);
+  if (!parsed.success)
+    return res.status(400).json({ error: 'invalid_payload' });
+  const template = ROUTINE_TEMPLATES.find(
+    (t) => t.source === parsed.data.source,
+  );
+  if (!template) return res.status(404).json({ error: 'template_not_found' });
+
+  const sk = await findSkeleton(req.params.id);
+  if (!sk) return res.status(404).json({ error: 'not_found' });
+  if (sk.status !== 'pending_review')
+    return res.status(409).json({ error: 'not_pending' });
+
+  const profile = (
+    await pool.query(`SELECT * FROM athlete_profiles WHERE user_id = $1`, [
+      sk.athlete_id,
+    ])
+  ).rows[0];
+  const exercises = await listExercisesForAthlete(profile, sk.athlete_id);
+  const catalog = await listExercises();
+  const swap = substituteUnavailableSlots(template, exercises, catalog);
+  const allowedIds = new Set(exercises.map((x) => x.id));
+  const base = buildSkeletonFromTemplate({
+    ...swap.template,
+    days_detail: swap.template.days_detail.map((d) => ({
+      ...d,
+      slots: d.slots.filter((s) => allowedIds.has(s.exercise_id)),
+    })),
+  });
+  const removed = swap.unresolved.length
+    ? ` Se quitaron por no estar disponibles para el atleta: ${swap.unresolved.join(', ')}.`
+    : '';
+  const ok = await replacePendingSkeletonContent(
+    sk.id,
+    {
+      ...base,
+      rationale: `Rutina elegida por el admin: ${template.source}.${removed}`,
+    },
+    {
+      source: 'admin_template',
+      template: template.source,
+      substituted: swap.substituted,
+    },
+  );
+  if (!ok) return res.status(409).json({ error: 'not_pending' });
+  res.status(204).end();
 });
 
 router.get('/:id', async (req, res) => {

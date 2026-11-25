@@ -60,10 +60,19 @@ export interface AthleteRutina {
   status: 'pending_review' | 'approved' | 'rejected' | 'superseded';
   generated_by: 'ai' | 'coach';
   generation_rationale: string | null;
+  /** Generation metadata; `template` is the coach base routine used. */
+  generation_prompt?: { template?: string } | null;
   rejection_feedback: string | null;
   created_at: string;
   reviewed_at: string | null;
   reviewed_by: string | null;
+}
+
+export interface RoutineTemplateSummary {
+  source: string;
+  gender: 'male' | 'female';
+  days: number;
+  leg_days: number | null;
 }
 
 export interface RutinaPeriodization {
@@ -90,6 +99,7 @@ export interface RutinaDetail {
     level: 'nunca' | 'bajo' | 'medio' | 'avanzado' | 'muy_avanzado';
     goal: 'hipertrofia' | 'fuerza' | 'recomp' | 'perdida_grasa';
     days_per_week: number;
+    leg_days?: number | null;
     days_specific:
       ('lun' | 'mar' | 'mie' | 'jue' | 'vie' | 'sab' | 'dom')[] | null;
     equipment: 'gym_completo' | 'gym_basico' | 'casa_basica' | 'solo_bw';

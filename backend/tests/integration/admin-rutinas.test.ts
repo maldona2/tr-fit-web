@@ -850,6 +850,62 @@ describe('POST /api/admin/rutinas/:id/discard', () => {
   });
 });
 
+describe('Admin picks a coach template for a pending rutina', () => {
+  it('lists templates and replaces the pending slots in place', async () => {
+    const adminId = await createAdmin();
+    const athleteId = await createAthlete(adminId);
+    const { skeletonId } = await createPendingSkeleton(
+      { athleteId, generationPrompt: {}, generationRationale: 'r' },
+      aiOut
+    );
+    const tok = signToken({ id: adminId, role: 'admin' });
+
+    const list = await request(app)
+      .get('/api/admin/rutinas/templates')
+      .set('Authorization', `Bearer ${tok}`);
+    expect(list.status).toBe(200);
+    expect(list.body.length).toBeGreaterThan(0);
+    const source = list.body.find(
+      (t: { days: number; gender: string }) => t.days === 4 && t.gender === 'male'
+    ).source;
+
+    const r = await request(app)
+      .post(`/api/admin/rutinas/${skeletonId}/template`)
+      .set('Authorization', `Bearer ${tok}`)
+      .send({ source });
+    expect(r.status).toBe(204);
+
+    const detail = await request(app)
+      .get(`/api/admin/rutinas/${skeletonId}`)
+      .set('Authorization', `Bearer ${tok}`);
+    expect(detail.body.skeleton.status).toBe('pending_review');
+    expect(detail.body.skeleton.generation_prompt.template).toBe(source);
+    expect(detail.body.skeleton.generation_rationale).toContain(source);
+    const days = new Set(
+      detail.body.slots.map((s: { day_of_week: number }) => s.day_of_week)
+    );
+    expect(days.size).toBe(4);
+  });
+
+  it('rejects unknown templates and processed skeletons', async () => {
+    const { skeletonId, tok } = await setupActiveRutina();
+    const bad = await request(app)
+      .post(`/api/admin/rutinas/${skeletonId}/template`)
+      .set('Authorization', `Bearer ${tok}`)
+      .send({ source: 'nope.xlsx' });
+    expect(bad.status).toBe(404);
+
+    const list = await request(app)
+      .get('/api/admin/rutinas/templates')
+      .set('Authorization', `Bearer ${tok}`);
+    const r = await request(app)
+      .post(`/api/admin/rutinas/${skeletonId}/template`)
+      .set('Authorization', `Bearer ${tok}`)
+      .send({ source: list.body[0].source });
+    expect(r.status).toBe(409);
+  });
+});
+
 // ── Test 10: Fall-through to queue router for /:skeletonId ──
 
 describe('Fall-through to queue router', () => {

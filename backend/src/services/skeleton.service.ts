@@ -34,7 +34,15 @@ export async function writePendingSkeleton(
     ]
   );
   const skeletonId = sk.rows[0].id;
+  await writeSkeletonContent(client, skeletonId, aiOutput);
+  return { skeletonId };
+}
 
+async function writeSkeletonContent(
+  client: PoolClient,
+  skeletonId: string,
+  aiOutput: AiSkeletonOutput,
+): Promise<void> {
   for (const day of aiOutput.days) {
     for (const slot of day.slots) {
       // Per-slot prescription only applies to accessories; null it out for
@@ -69,8 +77,44 @@ export async function writePendingSkeleton(
       [skeletonId, day.day_index, day.focus]
     );
   }
+}
 
-  return { skeletonId };
+/**
+ * Swaps the whole content (slots, day labels, rationale) of a pending
+ * skeleton, keeping its id so the review queue position is unchanged.
+ * Returns false when the skeleton is missing or no longer pending.
+ */
+export async function replacePendingSkeletonContent(
+  skeletonId: string,
+  aiOutput: AiSkeletonOutput,
+  promptPatch: Record<string, unknown>,
+): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const r = await client.query(
+      `UPDATE athlete_skeletons
+          SET generation_rationale = $2,
+              generation_prompt = COALESCE(generation_prompt, '{}'::jsonb) || $3::jsonb
+        WHERE id = $1 AND status = 'pending_review'
+        RETURNING id`,
+      [skeletonId, aiOutput.rationale, JSON.stringify(promptPatch)]
+    );
+    if (r.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await client.query(`DELETE FROM skeleton_slots WHERE skeleton_id = $1`, [skeletonId]);
+    await client.query(`DELETE FROM skeleton_days WHERE skeleton_id = $1`, [skeletonId]);
+    await writeSkeletonContent(client, skeletonId, aiOutput);
+    await client.query('COMMIT');
+    return true;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createPendingSkeleton(
