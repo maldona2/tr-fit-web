@@ -254,25 +254,64 @@ npm run format:check  # Check formatting without changing files
 
 ## 🚀 Deployment
 
-### Production Build
+Production runs on **Coolify** on a **Hetzner** server (migrated from Railway in
+October 2026). Public URL: https://app.tatoroblesfit.com.
 
-1. Build both frontend and backend:
-   ```bash
-   npm run build
-   ```
+- Coolify builds `backend/Dockerfile` and `frontend/Dockerfile` (nginx serving
+  the Vite build) straight from the `main` branch of this repo.
+- The backend applies pending migrations on boot (see above), so a deploy is
+  all a schema change needs.
+- Environment variables live in Coolify (resource → Environment Variables).
+  `backend/env.example` and `frontend/env.example` list what each one needs.
 
-2. Start with Docker Compose:
-   ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-   ```
+### Auto-deploy on push to `main`
 
-### Environment Setup for Production
+Every merge to `main` should redeploy both resources. Coolify does that only
+when GitHub notifies it. **Connecting the repo as a "Public Repository" does
+not notify it**, so pushes do nothing and the site stays on the last manual
+deploy. Use one of these, per resource (backend and frontend):
 
-Make sure to set appropriate environment variables:
-- Update `DATABASE_URL` with production database credentials
-- Set `NODE_ENV=production`
-- Configure `FRONTEND_URL` with your production domain
-- Set secure passwords and secrets
+**Option A: GitHub App (recommended)**
+
+1. Coolify → Sources → `+ Add` → GitHub App, then install it on
+   `maldona2/tr-fit-web` (moved from `maldonadomatias` in November 2026).
+2. In each resource → Configuration → Source, switch to that GitHub App,
+   branch `main`.
+3. Resource → Configuration → Advanced → turn on **Auto Deploy**.
+
+**Option B: manual webhook (keeps the public-repo source)**
+
+1. Resource → Webhooks → set a **GitHub Webhook Secret** and save. Copy the
+   "Manual Git Webhook" URL for GitHub
+   (`https://<coolify-host>/webhooks/source/github/events/manual`).
+2. GitHub → repo Settings → Webhooks → Add webhook: that URL, content type
+   `application/json`, the same secret, event **Just the push event**.
+3. Resource → Configuration → Advanced → **Auto Deploy** on.
+
+Do not move the deploy to GitHub Actions: Actions on this account are blocked
+by a billing lock (jobs fail in seconds with "account is locked due to a
+billing issue"), which is also why the `CI` workflow is disabled.
+
+### Checking what production is running
+
+The frontend bundle name changes on every build. Compare the deployed bundle's
+date with the latest merge to `main`:
+
+```bash
+curl -s https://app.tatoroblesfit.com | grep -oE 'assets/index-[^"]+\.js'
+curl -sI https://app.tatoroblesfit.com/assets/<bundle>.js | grep -i last-modified
+```
+
+If it is older than the last merge, open the resource in Coolify →
+Deployments: a failed build shows there; no entry at all means the push never
+reached Coolify (see auto-deploy above). Press **Redeploy** to ship now.
+
+### Local production build
+
+```bash
+npm run build
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
 
 ## 📚 Next Steps
 
