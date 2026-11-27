@@ -1,15 +1,12 @@
 import { jest } from '@jest/globals';
 
 const mockSend = jest.fn<() => Promise<unknown>>();
-jest.unstable_mockModule('firebase-admin', () => ({
-  default: {
-    initializeApp: jest.fn(),
-    credential: { cert: jest.fn() },
-    messaging: () => ({ send: mockSend }),
-    // Non-empty so getFirebaseApp() returns the existing app and skips parsing
-    // FIREBASE_SERVICE_ACCOUNT_JSON (unset in tests, which would throw).
-    apps: [{ name: '[DEFAULT]' }],
-  },
+jest.unstable_mockModule('firebase-admin/messaging', () => ({
+  getMessaging: () => ({ send: mockSend }),
+}));
+jest.unstable_mockModule('../../src/config/firebase.js', () => ({
+  getFirebaseApp: jest.fn(),
+  getStorageBucket: jest.fn(),
 }));
 
 const { sendPush } = await import('../../src/services/push.service.js');

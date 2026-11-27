@@ -1,4 +1,4 @@
-import admin from 'firebase-admin';
+import { getMessaging } from 'firebase-admin/messaging';
 import { env } from '../config/env.js';
 import { getFirebaseApp } from '../config/firebase.js';
 import logger from '../utils/logger.js';
@@ -19,9 +19,9 @@ export async function sendPush(
     logger.info('FCM push blocked in rehearsal');
     return 'failed';
   }
-  getFirebaseApp();
+  const app = getFirebaseApp();
   try {
-    await admin.messaging().send({
+    await getMessaging(app).send({
       token,
       notification: { title: payload.title, body: payload.body },
       data: payload.data ?? {},

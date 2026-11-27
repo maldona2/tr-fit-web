@@ -1,20 +1,22 @@
-import admin from 'firebase-admin';
+import { cert, getApps, initializeApp, type App, type ServiceAccount } from 'firebase-admin/app';
+import { getStorage } from 'firebase-admin/storage';
 import { env } from './env.js';
 
-let app: admin.app.App | null = null;
+let app: App | null = null;
 
-export function getFirebaseApp(): admin.app.App {
+export function getFirebaseApp(): App {
   if (app) return app;
-  if (admin.apps.length > 0) {
-    app = admin.apps[0]!;
+  const existing = getApps();
+  if (existing.length > 0) {
+    app = existing[0]!;
     return app;
   }
-  const sa = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_JSON) as admin.ServiceAccount;
-  app = admin.initializeApp({ credential: admin.credential.cert(sa) });
+  const sa = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT_JSON) as ServiceAccount;
+  app = initializeApp({ credential: cert(sa) });
   return app;
 }
 
 /** The Cloud Storage bucket used for athlete profile pictures. */
 export function getStorageBucket() {
-  return admin.storage(getFirebaseApp()).bucket(env.FIREBASE_STORAGE_BUCKET);
+  return getStorage(getFirebaseApp()).bucket(env.FIREBASE_STORAGE_BUCKET);
 }
