@@ -274,7 +274,7 @@ deploy. Use one of these, per resource (backend and frontend):
 **Option A: GitHub App (recommended)**
 
 1. Coolify → Sources → `+ Add` → GitHub App, then install it on
-   `maldonadomatias/tr-fit-web`.
+   `maldona2/tr-fit-web` (moved from `maldonadomatias` in November 2026).
 2. In each resource → Configuration → Source, switch to that GitHub App,
    branch `main`.
 3. Resource → Configuration → Advanced → turn on **Auto Deploy**.
