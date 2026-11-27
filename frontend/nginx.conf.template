@@ -10,6 +10,18 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # index.html names the hashed bundle; without this, browsers cache it
+    # heuristically and keep loading the previous deploy's JS.
+    location = /index.html {
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # Vite assets are content-hashed, so a new deploy gets new file names.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
     location /api {
         # nginx defaults to 1 MB; exercise video uploads allow up to 100 MB (multer cap).
         client_max_body_size 110m;
